@@ -1,0 +1,250 @@
+<head>
+	<title id="tabTitle">Level Info</title>
+	<meta charset="utf-8">
+	<link href="assets/css/browser.css" type="text/css" rel="stylesheet">
+	<style>
+		img { -webkit-user-drag: none; user-select: none; }
+	</style>
+</head>
+
+<body class="levelBG" style="overflow:hidden">
+
+<div id="everything">
+
+	<div class="popup" id="infoDiv">
+		<div class="fancybox bounce center supercenter">
+			<h2 class="smaller center" style="font-size: 5.5vh">Level Info</h2>
+			<p class="bigger center" id="levelInfo" style="line-height: 5vh; margin-top: 1.5vh;"></p>
+			<img src="assets/ok.png" width=20%; class="gdButton center closeWindow">
+		</div>
+	</div>
+
+	<div class="popup" id="saveDiv">
+		<div class="fancybox bounce center supercenter">
+			<h2 class="smaller center" style="font-size: 5.5vh">Saved!</h2>
+			<p class="bigger center" style="line-height: 5vh; margin-top: 1.5vh;">
+				<cy class="pre" id="savedName"></cy> has been added to your saved levels list.
+			</p>
+			<img src="assets/ok.png" width=20%; class="gdButton center closeWindow">
+		</div>
+	</div>
+
+	<div class="popup" id="deleteDiv">
+		<div class="fancybox bounce center supercenter" style="width: 60vh; height: 28%">
+			<h2 class="smaller center" style="font-size: 5.5vh">Delete Level</h2>
+			<p class="bigger center" style="line-height: 5vh; margin-top: 1.5vh;">
+				Are you sure you want to <cr>delete</cr> this level from your saved levels list?
+			</p>
+			<img src="assets/btn-no.png" height=25%; class="gdButton center closeWindow">
+			<img src="assets/btn-yes.png" height=25%; class="gdButton center sideSpaceB" id="confirmDelete">
+		</div>
+	</div>
+
+	<div style="position:absolute; bottom: 0%; left: 0%; width: 100%">
+		<img class="cornerPiece" src="assets/corner.png" width=7%;>
+	</div>
+
+	<div style="position:absolute; bottom: 0%; right: 0%; width: 100%; text-align: right;">
+		<img class="cornerPiece" src="assets/corner.png" width=7%; style="transform: scaleX(-1)">
+	</div>
+
+	<div id="loading" class="supercenter center">
+		<img class="spin noSelect" src="assets/loading.png" height="80">
+	</div>
+
+	<div id="content" style="display:none">
+
+		<div class="center" style="width: 70%; margin: 1% auto">
+			<h1 class="pre" id="lvlName" style="transform: scale(1.2)"></h1>
+		</div>
+
+		<div class="center" style="position:absolute; top: 9%; left: 0%; right: 0%; height: 5%;">
+			<h2 class="pre inline slightlySmaller normalCursor gdButton" id="authorName"><a class="linkButton" id="authorLink" target="_blank" style="color:inherit; text-decoration:none">By <span id="lvlAuthor"></span></a></h2>
+			<h2 class="inline slightlySmaller normalCursor sideSpaceC">
+				<img class="inline valign" id="copiedBadge" style="display: none; height: 60%; cursor:help" src="assets/copied.png" title="Level is a copy or a collaboration">
+				<img class="inline valign" id="largeBadge" style="display: none; height: 60%; margin-left: -7%; cursor:help" src="assets/large.png" title="Contains more than 40,000 objects">
+				<img class="inline valign" id="2pBadge" style="display: none; height: 60%; margin-left: -7%; cursor:help" src="assets/twoPlayer.png" title="Two player level">
+			</h2>
+		</div>
+
+		<div class="center valign" style="position:absolute; top: 10.5%; left: 27%; transform:scale(0.8); height: 100%; width: 20%">
+			<img class="spaced" id="diffFace" src="" height="20%" style="margin-bottom: 0%">
+			<h1 class="smaller" id="difficultytext" style="transform:scale(0.9);"></h1>
+			<h1 class="smaller inline stars" id="starText" style="transform:scale(0.9)"></h1> <img class="inline stars" id="starIcon" src="assets/star.png" height=4%; style="transform:translateY(-12%)"><br class="stars">
+			<div id="coins" style="margin-top: 3%"></div>
+		</div>
+
+		<div style="position:absolute; top: 20%; right: 0%; height: 38%; width: 40%; line-height: 8.5vh">
+			<img class="valign inline spaced" src="assets/download.png" height=15% style="margin-right: 2%">
+			<h1 class="valign inline smaller spaced" id="statDownloads"></h1><br>
+			<img class="valign inline spaced" id="likeImg" src="assets/like.png" height=15% style="margin-right: 2%">
+			<h1 class="valign inline smaller spaced" id="statLikes"></h1><br>
+			<img class="valign inline spaced" src="assets/time.png" height=15% style="margin-right: 2%">
+			<h1 class="valign inline smaller spaced" id="statLength"></h1><br>
+			<img class="valign inline spaced orbs" src="assets/orbs.png" height=15% style="margin-right: 2%">
+			<h1 class="valign inline smaller spaced orbs" id="statOrbs"></h1>
+		</div>
+
+		<div class="transparentBox center" id="descBox" style="position:absolute; bottom: 32%; left: 0; right: 0; width: 75vh; margin-left: auto; margin-right: auto; display:none">
+			<p class="pre" id="lvlDesc" style="padding: 0 5%; white-space:normal"></p>
+		</div>
+
+		<div class="brownBox" id="songBox" style="position:absolute; bottom: 4%; left: 0; right: 0; width: 85vh; height: 20%; margin-left: auto; margin-right: auto;">
+			<div style="margin-left: 0.5%">
+				<h1 class="pre slightlySmaller" id="songname"></h1>
+				<h2 class="pre smaller">By: <span id="songAuthor"></span></h2>
+			</div>
+		</div>
+
+		<div class="center" style="position:absolute; bottom: 5%; left: 0; right: 0">
+			<h1 id="songInfo" style="transform: scale(0.5);"></h1>
+		</div>
+
+		<div class="center noClick" style="position:absolute; top: 24%; right: 0%; min-width: 100%">
+			<img class="gdButton yesClick" id="playButton" src="assets/playbuttonlevel.png" width="11%">
+		</div>
+
+		<div class="levelButtons" style="position:absolute; top: 46%; right: 3.5%; transform: translateY(-50%); height: 75%;">
+			<img class="gdButton sideButton" title="Save level" id="saveButton" src="assets/plus.png"><br>
+			<img class="gdButton sideButton" title="Level Info" id="infoButton" src="assets/info.png"><br>
+		</div>
+
+	</div>
+
+	<div style="position:absolute; top: 2%; left: 1.5%; width: 10%; height: 25%; pointer-events: none">
+		<img class="gdButton yesClick" id="backButton" src="assets/back.png" height="30%" onclick="closeLevelInfoPage()">
+	</div>
+
+</div>
+
+</body>
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<script>
+function closeLevelInfoPage() {
+	if (window.history.length > 1) {
+		try {
+			window.history.back()
+			return
+		} catch (e) {}
+	}
+	window.parent.postMessage({ type: 'WD_CLOSE_SEARCH' }, '*')
+}
+
+const params = new URLSearchParams(window.location.search)
+const levelID = params.get('id')
+let lvl = null
+
+function clean(text) { return (text || "").toString().replace(/&/g, "&#38;").replace(/</g, "&#60;").replace(/>/g, "&#62;").replace(/"/g, "&#34;").replace(/'/g, "&#39;") }
+
+fetch(`https://gdbrowser.com/api/level/${levelID}`)
+	.then(r => r.ok ? r.json() : Promise.reject())
+	.then(data => {
+		lvl = data
+		$('#loading').hide()
+		$('#content').show()
+		document.title = lvl.name || "Level Info"
+
+		$('#lvlName').text(lvl.name || "-")
+		$('#lvlAuthor').text(lvl.author || "-")
+		$('#authorLink').attr('href', `https://gdbrowser.com/u/${lvl.accountID || 0}.`)
+		if (!lvl.accountID || lvl.accountID == "0") $('#authorName').addClass('green').addClass('unregistered')
+
+		$('#diffFace').attr('src', `assets/difficulties/${lvl.difficultyFace || 'unrated'}.png`)
+		$('#difficultytext').html((lvl.difficulty || "").replace(' ', "<br>"))
+
+		if (lvl.stars > 0) { $('#starText').text(lvl.stars); $('#starIcon').show() } else { $('.stars').hide() }
+
+		$('#statDownloads').text(lvl.downloads ?? 0)
+		$('#statLikes').text(lvl.likes ?? 0)
+		if (lvl.disliked) $('#likeImg').attr('src', 'assets/dislike.png').css('transform', 'translateY(20%)')
+		$('#statLength').text(lvl.length || "-")
+		$('#statOrbs').text(lvl.orbs ?? 0)
+		if (!lvl.orbs) $('.orbs').hide()
+
+		if (lvl.description) { $('#lvlDesc').text(lvl.description); $('#descBox').show() }
+
+		let coinColor = lvl.verifiedCoins ? "silvercoin" : "browncoin"
+		if (lvl.coins > 0) $("#coins").append(`<img src="assets/${coinColor}.png" height="5%">`)
+		if (lvl.coins > 1) $("#coins").append(`<img class="squeeze" src="assets/${coinColor}.png" height="5%">`)
+		if (lvl.coins > 2) $("#coins").append(`<img class="squeeze" src="assets/${coinColor}.png" height="5%">`)
+
+		if (lvl.large) $('#largeBadge').show()
+		if (lvl.twoPlayer) $('#2pBadge').show()
+		if (lvl.copiedID > 0) $('#copiedBadge').show()
+
+		$('#songname').text(clean(lvl.songName || "Unknown"))
+		$('#songAuthor').text(lvl.songAuthor || "-")
+		if (String(lvl.songID || "").toString().startsWith("Level")) $('#songInfo').text(lvl.songID)
+		else $('#songInfo').text(`SongID: ${lvl.songID ?? "-"}   Size: ${lvl.songSize ? lvl.songSize + "MB" : "-"}`)
+
+		// level info popup body, same layout/wording as the real gdbrowser popup
+		let info = `<span class="pre" style="color:lime">${clean(lvl.name)}</span><br>ID: <cy>${lvl.id}</cy>`
+		if (lvl.copiedID > 0) info += `<br>Original: <cy>${lvl.copiedID}</cy>`
+		info += `<br>Low Detail: <co>${lvl.ldm ? "Yes" : "No"}</co>`
+		if (lvl.uploadDate) info += `<br>Uploaded: <co>${clean(lvl.uploadDate)}</co>`
+		if (lvl.updateDate) info += `<br>Updated: <co>${clean(lvl.updateDate)}</co>`
+		info += `<br>GD Version: <cy>${lvl.gameVersion ?? "-"}</cy>`
+		if (lvl.objects) info += `<br>Objects: <cy>${lvl.objects == 65535 ? "65535+" : lvl.objects}</cy>`
+		if (lvl.requestedStars) info += `<br>Stars Requested: <cy>${lvl.requestedStars}</cy>`
+		$('#levelInfo').html(info)
+	})
+	.catch(() => {
+		$('#loading').hide()
+		$('#everything').append('<div class="supercenter center"><h1>Could not load this level</h1></div>')
+	})
+
+$('#playButton').click(() => { if (levelID) window.parent.postMessage({ type: 'WD_PLAY_LEVEL', id: String(levelID) }, '*') })
+
+let savedLevels = JSON.parse(localStorage.getItem('wdSavedLevels') || '[]')
+function refreshSaveButton() {
+	let isSaved = savedLevels.some(s => String(s.id) === String(levelID))
+	$('#saveButton').attr('src', isSaved ? 'assets/delete.png' : 'assets/plus.png').attr('title', isSaved ? 'Remove level' : 'Save level')
+}
+refreshSaveButton()
+
+$('#saveButton').click(() => {
+	if (!lvl) return
+	let isSaved = savedLevels.some(s => String(s.id) === String(lvl.id))
+	if (isSaved) { $('#deleteDiv').show(); return }
+	savedLevels.push({ id: lvl.id, name: lvl.name, author: lvl.author, accountID: lvl.accountID, difficultyFace: lvl.difficultyFace, stars: lvl.stars, difficulty: lvl.difficulty, songName: lvl.songName, songID: lvl.songID, length: lvl.length, downloads: lvl.downloads, likes: lvl.likes, orbs: lvl.orbs, coins: lvl.coins, verifiedCoins: lvl.verifiedCoins, twoPlayer: lvl.twoPlayer, large: lvl.large, copiedID: lvl.copiedID })
+	localStorage.setItem('wdSavedLevels', JSON.stringify(savedLevels))
+	refreshSaveButton()
+	$('#savedName').text(lvl.name || "-")
+	$('#saveDiv').show()
+})
+
+$('#confirmDelete').click(() => {
+	savedLevels = savedLevels.filter(s => String(s.id) !== String(levelID))
+	localStorage.setItem('wdSavedLevels', JSON.stringify(savedLevels))
+	refreshSaveButton()
+	$('.popup').hide()
+})
+
+$('#infoButton').click(() => { if (lvl) $('#infoDiv').show() })
+
+$('.closeWindow').click(function() { $(".popup").attr('style', 'display: none;') })
+
+$(document).keydown(function(k) {
+	if (k.keyCode == 27) {
+		if ($('.popup').is(':visible')) $('.popup').hide()
+		else closeLevelInfoPage()
+	}
+})
+
+$(window).resize(function() {
+	if (window.innerHeight > window.innerWidth - 75) $('#everything').hide()
+	else $('#everything').show()
+})
+window.addEventListener('pageshow', function() {
+	window.parent.postMessage({ type: 'WD_IFRAME_ACTIVE' }, '*');
+});
+window.addEventListener('focus', function() {
+	window.parent.postMessage({ type: 'WD_IFRAME_ACTIVE' }, '*');
+});
+window.addEventListener('popstate', function() {
+	window.parent.postMessage({ type: 'WD_IFRAME_ACTIVE' }, '*');
+});
+$(document).ready(function() { $(window).trigger('resize'); window.parent.postMessage({ type: 'WD_IFRAME_ACTIVE' }, '*'); })
+
+</script>
+<script src="menu-audio.js"></script>
