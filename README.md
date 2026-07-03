@@ -45,7 +45,7 @@
 ## Things currently in development:
 - **Practice Mode** - Although a early version of Practice mode is already in the game, we hope to make a completely working Practice Mode with no bugs at all.
 - **Level Editor** - We wish to add a fully working level editor, with all of the objects in Geometry Dash to choose from, and more!
-- **Slopes** - Slopes are almost done, but we need to get their physics correct with other speed portals!
+- **Slopes** - Slopes are never going to be done.
 
 ## What we hope to see added in the future:
 - **All Gamemodes** - This will allow every official main level to be playable, along with others that require currently un-implemented gamemodes.
