@@ -204,7 +204,7 @@
   "meta": {
     "app": "https://gdcolon.com/gdsplitter/",
     "version": "1.0",
-    "image": "GJ_GeodeSheet-hd.png",
+    "image": "GJ_GeodeSheet.png",
     "format": "RGBA8888",
     "size": {
       "w": 1021,
