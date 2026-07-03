@@ -4,20 +4,20 @@
       "frame": {
         "x": 0,
         "y": 701,
-        "w": 128,
-        "h": 128
+        "w": 227,
+        "h": 227
       },
       "rotated": false,
       "trimmed": true,
       "spriteSourceSize": {
-        "x": 0,
-        "y": 0,
-        "w": 128,
-        "h": 128
+        "x": 212,
+        "y": 72,
+        "w": 227,
+        "h": 227
       },
       "sourceSize": {
-        "w": 128,
-        "h": 128
+        "w": 666,
+        "h": 375
       }
     },
     "geode-logo-alternate.png": {
@@ -62,8 +62,8 @@
     },
     "geode-logo-outline-gold.png": {
       "frame": {
-        "x": 129,
-        "y": 701,
+        "x": 344,
+        "y": 782,
         "w": 128,
         "h": 127
       },
@@ -82,8 +82,8 @@
     },
     "geode-logo-outline.png": {
       "frame": {
-        "x": 813,
-        "y": 555,
+        "x": 344,
+        "y": 650,
         "w": 129,
         "h": 131
       },
@@ -162,8 +162,8 @@
     },
     "sapphire-logo-outline-gold.png": {
       "frame": {
-        "x": 697,
-        "y": 555,
+        "x": 228,
+        "y": 701,
         "w": 115,
         "h": 133
       },
@@ -204,11 +204,11 @@
   "meta": {
     "app": "https://gdcolon.com/gdsplitter/",
     "version": "1.0",
-    "image": "GJ_GeodeSheet.png",
+    "image": "GJ_GeodeSheet-hd.png",
     "format": "RGBA8888",
     "size": {
       "w": 1021,
-      "h": 829
+      "h": 928
     },
     "scale": 1
   }
