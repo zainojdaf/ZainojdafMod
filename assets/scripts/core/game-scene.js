@@ -262,9 +262,9 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     this._expandHitArea(this._menuDailyChestBtn, 1);
     this._makeBouncyButton(this._menuDailyChestBtn, 1, () => {
     }, () => this._menuActive);
-    this._menuGeodeCircleBtn = this.add.image(centerX + 367, screenHeight - 90, "GJ_GeodeSheet", "geode-circle.png").setScrollFactor(0).setDepth(30).setInteractive().setScale(0.4);
+    this._menuGeodeCircleBtn = this.add.image(centerX + 367, screenHeight - 90, "GJ_GeodeSheet", "geode-circle.png").setScrollFactor(0).setDepth(30).setInteractive().setScale(0.35);
     this._expandHitArea(this._menuGeodeCircleBtn, 1);
-    this._makeBouncyButton(this._menuGeodeCircleBtn, 0.4, () => {
+    this._makeBouncyButton(this._menuGeodeCircleBtn, 0.35, () => {
     }, () => this._menuActive);
     this._menuNewgroundsBtn = this.add.image(centerX + 257, screenHeight - 90, "GJ_GameSheet03", "GJ_ngBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
     this._expandHitArea(this._menuNewgroundsBtn, 1);
