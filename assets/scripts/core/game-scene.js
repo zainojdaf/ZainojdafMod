@@ -58,6 +58,7 @@ class PracticeMode {
       groundY: scene._level._groundY,
       ceilingY: scene._level._ceilingY,
       speed: playerSpeed,
+      physicsFrame: scene._physicsFrame,
       timestamp: Date.now()
     };
     this.checkpoints.push(checkpoint);
@@ -100,6 +101,184 @@ class PracticeMode {
   }
 }
 
+class MacroBot {
+  constructor(scene) {
+    this.scene = scene;
+    this.resetAll();
+  }
+
+  resetAll() {
+    this.recording = false;
+    this.playing = false;
+
+    this.cursor = 0;
+    this.isDown = false;
+
+    this.inputs = [];
+
+    this.meta = {
+      author: "Web Dashers",
+      level: "", // ill fix ts later
+      version: 1
+    };
+  }
+
+  startRecording(meta = {}) {
+    this.resetAll();
+    this.recording = true;
+    this.meta = { ...meta };
+  }
+
+  stopRecording() {
+    this.recording = false;
+    return this.exportObject();
+  }
+
+  clearRecording() {
+    this.inputs = [];
+    this.cursor = 0;
+    this.isDown = false;
+  }
+
+  rollbackRecording(currentFrame) {
+    this.inputs = this.inputs.filter(ev => (ev.frame ?? 0) <= currentFrame);
+    this.cursor = 0;
+    this.isDown = false;
+  }
+
+  clearPlayback() {
+    this.cursor = 0;
+    this.isDown = false;
+  }
+
+  rollbackPlayback(currentFrame) {
+    if (!this.inputs.length) return;
+
+    this.cursor = 0;
+    this.isDown = false;
+
+    this.scene._releaseButton(true);
+
+    while (
+      this.cursor < this.inputs.length &&
+      (this.inputs[this.cursor].frame ?? 0) <= currentFrame
+    ) {
+      const ev = this.inputs[this.cursor++];
+
+      if (ev.down) {
+        this.scene._pushButton(true);
+        this.isDown = true;
+      } else {
+        this.scene._releaseButton(true);
+        this.isDown = false;
+      }
+    }
+  }
+
+  startPlayback(macroData) {
+    const macro = typeof macroData === "string" ? JSON.parse(macroData) : macroData;
+
+    this.resetAll();
+    this.playing = true;
+
+    this.meta = {
+      ...this.meta,
+      ...(macro || {})
+    };
+
+    this.inputs = Array.isArray(macro?.inputs) ? macro.inputs.slice() : [];
+    this.inputs.sort((a, b) => (a.frame ?? 0) - (b.frame ?? 0));
+
+    this.cursor = 0;
+    this.isDown = false;
+  }
+
+  stopPlayback() {
+    this.playing = false;
+    this.cursor = 0;
+    this.isDown = false;
+  }
+
+  recordEdge(down, currentFrame) {
+    if (!this.recording) return;
+
+    const last = this.inputs[this.inputs.length - 1];
+    if (last && last.down === !!down && last.frame === currentFrame) {
+      return;
+    }
+
+    this.inputs.push({
+      frame: currentFrame,
+      down: !!down
+    });
+
+    this.isDown = !!down;
+  }
+
+  step(currentFrame) {
+    if (!this.playing) return;
+
+    while (
+      this.cursor < this.inputs.length &&
+      (this.inputs[this.cursor].frame ?? 0) <= currentFrame
+    ) {
+      const ev = this.inputs[this.cursor++];
+
+      if (ev.down) {
+        if (!this.isDown) {
+          this.scene._pushButton(true);
+          this.isDown = true;
+        }
+      } else {
+        if (this.isDown) {
+          this.scene._releaseButton(true);
+          this.isDown = false;
+        }
+      }
+    }
+  }
+
+  exportObject() {
+    return {
+      meta: this.meta,
+      inputs: this.inputs.slice()
+    };
+  }
+
+  exportString(pretty = false) {
+    return JSON.stringify(this.exportObject(), null, pretty ? 2 : 0);
+  }
+
+  download(filename = "macro.wbgdr") {
+    const blob = new Blob([this.exportString(true)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  importFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const text = String(event.target.result || "");
+          const macro = JSON.parse(text);
+          resolve(macro);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(reader.error || new Error("Failed to read macro file"));
+      reader.readAsText(file);
+    });
+  }
+}
+
 class GameScene extends Phaser.Scene {
   constructor() {
     super({
@@ -107,6 +286,166 @@ class GameScene extends Phaser.Scene {
     });
   }
   create() {
+    // Clean up any UHD overlay divs from previous scene instance
+    ['gj-s03-uhd', 'gj-s03-uhd-fade', 'gj-s03-uhd-flash', 'gj-s03-menu-dom'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+
+    // Universal GJ_GameSheet03/04 UHD overlay system.
+    // Intercepts every this.add.image call for those sheets and layers a native
+    // DOM <img> over it so the browser renders UHD pixels at full DPR.
+    const _uhdCont = document.createElement('div');
+    _uhdCont.id = 'gj-s03-uhd';
+    _uhdCont.style.cssText = 'position:fixed;pointer-events:none;z-index:499;overflow:hidden;left:0;top:0;width:0;height:0;';
+    document.body.appendChild(_uhdCont);
+    this._uhdCont = _uhdCont;
+    const _uhdFadeDiv = document.createElement('div');
+    _uhdFadeDiv.id = 'gj-s03-uhd-fade';
+    _uhdFadeDiv.style.cssText = 'position:fixed;pointer-events:none;z-index:500;left:0;top:0;width:0;height:0;background:#000;opacity:0;';
+    document.body.appendChild(_uhdFadeDiv);
+    this._uhdFadeDiv = _uhdFadeDiv;
+    // Noclip death flash mirror — must sit above EVERYTHING, including all UHD
+    // overlay imgs and the black fade div. Driven by this.noclipFlash's alpha.
+    const _uhdFlashDiv = document.createElement('div');
+    _uhdFlashDiv.id = 'gj-s03-uhd-flash';
+    _uhdFlashDiv.style.cssText = 'position:fixed;pointer-events:none;z-index:9000;left:0;top:0;width:0;height:0;background:#f00;opacity:0;';
+    document.body.appendChild(_uhdFlashDiv);
+    this._uhdFlashDiv = _uhdFlashDiv;
+    this._uhdContPos = null; // reset cache so update() resizes the new container immediately
+    this._uhdMap = new Map();
+    this._uhdContext = null; // null = main menu; must be set before any add.image calls
+    this._searchResultsOpen = false; // scene restarts reuse the instance; don't let a stale flag win the ctx priority chain
+    // Sync overlay positions after update() has moved containers/cameras for the frame
+    // (off-before-on: scene restarts reuse the same instance, avoid double registration)
+    this.events.off('postupdate', this._syncUhdOverlays);
+    this.events.on('postupdate', this._syncUhdOverlays);
+    const _sc = this;
+    // On scene restart this.add is the same plugin instance, so the patch from the
+    // previous create() may still be in place. Always unwrap to the true original first.
+    if (this.add.image._uhd_orig) this.add.image = this.add.image._uhd_orig;
+    const _uhdDirs = { GJ_GameSheet03: 'GJ_GameSheet03-uhd/', GJ_GameSheet04: 'GJ_GameSheet04-uhd/', GJ_WebSheet: 'GJ_WebSheet-uhd/', GJ_GameSheet: 'GJ_GameSheet-uhd/', GJ_GameSheet02: 'GJ_GameSheet02-uhd/' };
+    // Per-frame shrink applied only to the UHD overlay's own box (not the underlying sprite),
+    // so the replacement art renders smaller than the original frame while staying centered
+    // on it. Keyed as "textureKey:frameName".
+    const _uhdScaleOverrides = { 'GJ_WebSheet:GJ_logo_001.png': 0.95 };
+    // Atlas-rotated frames normally get CSS rotation suppressed (their UHD PNGs are saved in
+    // final visual orientation). But frames listed here are drawn at several code rotations
+    // (editor move arrows), so their overlay must follow go.rotation; the value is the offset
+    // between the PNG's on-disk orientation (up) and the frame's design orientation (left).
+    const _uhdRotateOverrides = {
+      'GJ_GameSheet03:edit_upBtn2_001.png': -Math.PI / 2,
+      'GJ_GameSheet03:edit_upBtn3_001.png': -Math.PI / 2,
+    };
+    // Per-frame position nudge (game units) applied only to the UHD overlay, not the
+    // underlying sprite. Keyed as "textureKey:frameName".
+    const _uhdOffsetOverrides = { 'GJ_WebSheet:GJ_logo_001.png': { x: -5, y: -5 } };
+    // Per-frame object-fit override. Default 'contain' never crops but can leave the old
+    // sprite visible in the letterboxed gap when the replacement art's aspect ratio doesn't
+    // match the original frame; 'cover' guarantees full coverage of the old frame's box
+    // (cropping the replacement's edges slightly) for cases where that gap is worse than the crop.
+    const _uhdFitOverrides = {};
+    // GJ_GameSheet03/04 have broad UHD coverage, so any frame from those sheets is safe to
+    // intercept (onerror hides the rare miss). GJ_WebSheet only has UHD art for the logo so
+    // far — intercepting every frame from it would create <img>s that 404 for everything else
+    // (toggle buttons, progress bars, etc.), and a broken-image icon can flash briefly before
+    // onerror hides it. Whitelist which GJ_WebSheet frames actually have UHD art.
+    const _uhdWebSheetFrames = new Set(['GJ_logo_001.png']);
+    const _uhdFrameAllowed = (key, frame) => key !== 'GJ_WebSheet' || _uhdWebSheetFrames.has(frame);
+    // GJ_GameSheet/GJ_GameSheet02 hold the gameplay objects. Their overlays are tagged
+    // obj-mode: alpha maps to CSS opacity (not the disabled-button grayscale), and the
+    // overlay hides for color-tinted or additive-blend sprites (canvas fallback), since
+    // DOM imgs can't replicate arbitrary tints or blend modes.
+    const _uhdObjSheet = (key) => key === 'GJ_GameSheet' || key === 'GJ_GameSheet02';
+    const _origAddImg = this.add.image.bind(this.add);
+    const _patchedAddImg = function(x, y, key, frame, ...rest) {
+      const go = _origAddImg(x, y, key, frame, ...rest);
+      if (_uhdDirs[key] && typeof frame === 'string' && _uhdFrameAllowed(key, frame)) {
+        // object-fit:contain (rather than the default fill/stretch) lets a UHD replacement
+        // whose own aspect ratio doesn't exactly match the original frame's sourceSize (e.g.
+        // a redrawn logo) scale in without distortion; it's a no-op when the aspect already
+        // matches, so it doesn't change anything for the existing GameSheet03/04 assets.
+        const _fitMode = _uhdFitOverrides[key + ':' + frame] || 'contain';
+        // Editor build-tab preview icons draw from the object sheets but are UI, not
+        // in-game objects — exempt them from the In-Game UHD toggle & lazy lifecycle,
+        // or they'd vanish behind their button-background overlays when it's off.
+        const _isObj = _uhdObjSheet(key) && !_sc._uhdPreviewIcons;
+        // Object-sheet sprites (level objects) get their DOM img lazily, in the sync
+        // loop, only while actually on screen — a long level would otherwise create
+        // thousands of img nodes up front and keep them all alive forever.
+        let di = null;
+        if (!_isObj) {
+          di = document.createElement('img');
+          di.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;display:none;object-fit:' + _fitMode + ';';
+          di.onerror = () => { di.style.display = 'none'; };
+          di.src = _uhdDirs[key] + frame;
+          _uhdCont.appendChild(di);
+        }
+        const entry = { img: di, src: _uhdDirs[key] + frame, fit: _fitMode, group: _sc._uhdContext, obj: _isObj, _sized: false, _vis: null, _t: null, uhdScale: _uhdScaleOverrides[key + ':' + frame] || 1, uhdOffset: _uhdOffsetOverrides[key + ':' + frame] || null, uhdRot: _uhdRotateOverrides[key + ':' + frame] != null ? _uhdRotateOverrides[key + ':' + frame] : null };
+        _sc._uhdMap.set(go, entry);
+        // Follow dynamic texture swaps (nav dots, checkboxes, etc.)
+        const _oST = go.setTexture.bind(go);
+        go.setTexture = function(k, f, ...a) {
+          const r = _oST(k, f, ...a);
+          if (_uhdDirs[k] && typeof f === 'string' && _uhdFrameAllowed(k, f)) {
+            const e = _sc._uhdMap.get(go);
+            if (e) { e.src = _uhdDirs[k] + f; if (e.img) e.img.src = e.src; e._sized = false; e.obj = _uhdObjSheet(k); e.uhdScale = _uhdScaleOverrides[k + ':' + f] || 1; e.uhdOffset = _uhdOffsetOverrides[k + ':' + f] || null; e.uhdRot = _uhdRotateOverrides[k + ':' + f] != null ? _uhdRotateOverrides[k + ':' + f] : null; }
+          }
+          return r;
+        };
+        // Follow same-texture frame swaps (editor build/edit/delete tabs, etc.)
+        const _oSFr = go.setFrame.bind(go);
+        go.setFrame = function(f, ...a) {
+          const r = _oSFr(f, ...a);
+          const k = go.texture && go.texture.key;
+          if (_uhdDirs[k] && typeof f === 'string' && _uhdFrameAllowed(k, f)) {
+            const e = _sc._uhdMap.get(go);
+            if (e) { e.src = _uhdDirs[k] + f; if (e.img) e.img.src = e.src; e._sized = false; e.obj = _uhdObjSheet(k); e.uhdScale = _uhdScaleOverrides[k + ':' + f] || 1; e.uhdOffset = _uhdOffsetOverrides[k + ':' + f] || null; e.uhdRot = _uhdRotateOverrides[k + ':' + f] != null ? _uhdRotateOverrides[k + ':' + f] : null; }
+          }
+          return r;
+        };
+        // On by default; opt out via localStorage.setItem('uhdHideOldTextures', '0')
+        // (a plain window flag would reset on every refresh):
+        // give interactive UI icons a companion invisible Zone as their real input
+        // target. Phaser (3.52+) drops non-rendering objects from hit testing and
+        // the old alwaysEnabled escape hatch for that was removed, so a Zone is the
+        // only supported way to let the sync loop hide this sprite's own canvas
+        // rendering (behind its UHD overlay) without also killing its clicks. Once
+        // the zone takes over, the original sprite's own interactive state stops
+        // mattering for input at all, which is what makes that hiding safe.
+        if (!_isObj) {
+          const _oSetInteractive = go.setInteractive.bind(go);
+          const _oDisableInteractive = go.disableInteractive.bind(go);
+          go.setInteractive = function(...args) {
+            const r = _oSetInteractive(...args);
+            go._uhdWantsInteractive = true;
+            if (localStorage.getItem('uhdHideOldTextures') !== '0' && go.input) {
+              if (!go._uhdHitZone) {
+                const _cursor = go.input.cursor;
+                const zone = _sc.add.zone(go.x, go.y, go.width || 1, go.height || 1)
+                  .setOrigin(go.originX, go.originY)
+                  .setInteractive(_cursor ? { cursor: _cursor } : undefined);
+                go._uhdHitZone = zone;
+                ['pointerdown', 'pointerup', 'pointerover', 'pointerout', 'pointerupoutside', 'pointermove']
+                  .forEach(evt => zone.on(evt, (...a) => go.emit(evt, ...a)));
+                const e = _sc._uhdMap.get(go);
+                if (e) e.hitZone = zone;
+              }
+              // go's own hit-testing is never used again once its zone exists — the
+              // sync loop drives the zone's enabled state from _uhdWantsInteractive.
+              _oDisableInteractive();
+            }
+            return r;
+          };
+          go.disableInteractive = function(...args) {
+            const r = _oDisableInteractive(...args);
+            go._uhdWantsInteractive = false;
+            return r;
+          };
+        }
+      }
+      return go;
+    };
+    _patchedAddImg._uhd_orig = this.add.image; // keep reference to original for unwrap on restart
+    this.add.image = _patchedAddImg;
+
     this._bgSpeedX = 0.1;
     this._bgSpeedY = 0.1;
     this._menuCameraX = -centerX;
@@ -152,6 +491,16 @@ class GameScene extends Phaser.Scene {
     if (_0x591888) {
       this._level.loadLevel(_0x591888);
     }
+    const _resolveEditorArtId = (key, fallback, displayOffset = 0) => {
+      const raw = window.settingsMap?.[key];
+      const parsed = parseInt(raw ?? fallback, 10);
+      const value = Number.isFinite(parsed) ? parsed : fallback;
+      return String(value + displayOffset).padStart(2, "0");
+    };
+
+    window._backgroundId = _resolveEditorArtId("kA6", parseInt(window._backgroundId || "01", 10) - 1, 1);
+    window._groundId = _resolveEditorArtId("kA7", parseInt(window._groundId || "00", 10), 0);
+
     const _bgId = window._backgroundId || "01";
     const _bgKey = "game_bg_" + (parseInt(_bgId, 10) - 1);
     if (this.textures.exists(_bgKey)) {
@@ -208,6 +557,10 @@ class GameScene extends Phaser.Scene {
     this._totalJumps = parseInt(localStorage.getItem("gd_totalJumps") || "0", 10);
     this._totalDeaths = parseInt(localStorage.getItem("gd_totalDeaths") || "0", 10);
     window._completedLevels = parseInt(localStorage.getItem("gd_completedLevels") || "0", 10);
+    window._totalStars = parseInt(localStorage.getItem("gd_totalStars") || "0", 10);
+    window._totalOrbs = parseInt(localStorage.getItem("gd_totalOrbs") || "0", 10);
+    this._coinsCollected = 0;
+    this._coinTotal = 0;
     this._playTime = 0;
     this._menuActive = true;
     this._slideIn = false;
@@ -216,61 +569,121 @@ class GameScene extends Phaser.Scene {
     this._player.setCubeVisible(false);
     this._player.setShipVisible(false);
     this._player.setBallVisible(false);
-    this._logo = this.add.image(0, 100, "GJ_LaunchSheet", "GJ_logo_001.png").setScrollFactor(0).setDepth(30);
-    this._robLogo = this.add.image(110, 595, "GJ_WebSheet", "RobTopLogoBig_001.png").setScrollFactor(0).setDepth(30).setScale(0.525).setInteractive();
-    this._makeBouncyButton(this._robLogo, 0.525, () => {
+    this._logo = this.add.image(0, 140, "GJ_WebSheet", "GJ_logo_001.png").setScrollFactor(0).setDepth(30);
+    this._robLogo = this.add.image(110, 595, "GJ_GameSheet03", "robtoplogo_small.png").setScrollFactor(0).setDepth(30).setScale(0.7).setInteractive();
+    this._makeBouncyButton(this._robLogo, 0.7, () => {
       window.open("https://geometrydash.com", "_blank");
     }, () => this._menuActive);
     const _socialIconDefs = [
-      { frame: "gj_fbIcon_001.png",      url: "https://www.facebook.com/RobTopGames",  angle: 0,   row: 0, col: 0 },
-      { frame: "gj_twIcon_001.png",      url: "https://x.com/rohanis0000gd",       angle: -90, flipX: true, row: 0, col: 1 },
-      { frame: "gj_ytIcon_001.png",      url: "https://www.youtube.com/@rohanis0000gd",  angle: 0,   row: 0, col: 2 },
+      {frame:  "",                       url: "",                                                     angle: 0,                row: 0, col: 0 },
+      {frame:  "",                       url: "",                                                     angle: 0,                row: 0, col: 1 },
+      {frame:  "",                       url: "",                                                     angle: 0,                row: 0, col: 2 },
+      {frame:  "",                       url: "",                                                     angle: 0,                row: 0, col: 3 },
+
+      { frame: "gj_twIcon_001.png",      url: "https://x.com/rohanis0000gd",                          angle: -90, flipX: true, row: 1, col: 0 },
+      { frame: "gj_ytIcon_001.png",      url: "https://www.youtube.com/@TheBlehLollipop",             angle: 0,                row: 1, col: 1 },
+      { frame: "gj_discordIcon_001.png", url: "https://discord.gg/9ZJyuJARK6",                        angle: 90,               row: 1, col: 2 },
+      {frame:  "",                       url: "",                                                     angle: 0,                row: 1, col: 3 },
+
+      {frame:  "",                       url: "",                                                     angle: 0,                row: 2, col: 0 },
+      {frame:  "",                       url: "",                                                     angle: 0,                row: 2, col: 1 },
+      {frame:  "",                       url: "",                                                     angle: 0,                row: 2, col: 2 },
+      {frame:  "",                       url: "",                                                     angle: 0,                row: 2, col: 3 },
+
+
+      //{ frame: "gj_instaIcon_001.png",   url: "https://www.instagram.com/",                           angle: -90, flipX: true, row: 1, col: 3 },
+      //{ frame: "gj_twitchIcon_001.png",  url: "https://www.twitch.tv/",                               angle: -90, flipX: true, row: 0, col: 0 },
+      //{ frame: "gj_fbIcon_001.png",      url: "https://www.facebook.com/",                            angle: 0,                row: 0, col: 0 },
+      //{ frame: "gj_rdIcon_001.png",      url: "https://www.reddit.com/r/geometrydash/",               angle: -90, flipX: true, row: 0, col: 0 },
+
     ];
     const _socialScale = 0.75;
-    this._socialIcons = _socialIconDefs.map(def => {
-      const icon = this.add.image(0, 0, "GJ_GameSheet03", def.frame)
-        .setScrollFactor(0).setDepth(30).setScale(_socialScale).setAngle(def.angle).setFlipX(!!def.flipX).setInteractive();
-      this._makeBouncyButton(icon, _socialScale, () => {
-        window.open(def.url, "_blank");
-      }, () => this._menuActive);
-      return icon;
-    });
-    const _0x28fa5b = this.scale.isFullscreen;
-this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFullscreenOff_001.png" : "toggleFullscreenOn_001.png").setScrollFactor(0).setDepth(30).setScale(0.64).setAlpha(0.8).setTint(Phaser.Display.Color.GetColor(255, 255, 255)).setInteractive();
-    this._expandHitArea(this._menuFsBtn, 1.5);
-    this._makeBouncyButton(this._menuFsBtn, 0.64, () => {
-      const _0x26b7c = !this.scale.isFullscreen;
-      this._menuFsBtn.setTexture("GJ_WebSheet", _0x26b7c ? "toggleFullscreenOff_001.png" : "toggleFullscreenOn_001.png");
-      this._expandHitArea(this._menuFsBtn, 1.5);
-      this._toggleFullscreen();
+    this._socialIcons = _socialIconDefs.map((def, index) => {
+    const icon = this.add.image(0, 0, "GJ_GameSheet03", def.frame)
+      .setScrollFactor(0)
+      .setDepth(30)
+      .setScale(_socialScale)
+      .setAngle(def.angle)
+      .setFlipX(!!def.flipX);
+
+    if (!def.frame || def.frame.trim() === "") {
+      icon.setVisible(false);
+      icon.setActive(false);
+      return icon; 
+    }
+    icon.setInteractive();
+    this._makeBouncyButton(icon, _socialScale, () => {
+      window.open(def.url, "_blank");
     }, () => this._menuActive);
-    this._menuSettingsBtn = this.add.image(centerX + 37, screenHeight - 90, "GJ_GameSheet03", "GJ_optionsBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
+
+    return icon;
+  });
+
+    this._copyrightText = this.add.text(0, 625, "© 2026 RobTop Games · geometrydash.com", {
+      fontSize: "14px",
+      color: "#ffffff",
+      fontFamily: "Arial"
+    }).setOrigin(1, 1).setScrollFactor(0).setDepth(30).setAlpha(0.3);
+    this._downloadBtns = [];
+    // Fullscreen toggle moved into the Graphics (Video Options) menu — see _buildGraphicsPopup()
+    this._menuInfoBtn = this.add.image(screenWidth + 20, 33, "GJ_GameSheet03", "communityCreditsBtn_001.png").setScrollFactor(0).setDepth(30).setScale(0.64).setTint(Phaser.Display.Color.GetColor(255, 255, 255)).setInteractive();
+    this._expandHitArea(this._menuInfoBtn, 1.5);
+    this._makeBouncyButton(this._menuInfoBtn, 0.64, () => {
+      this._buildInfoPopup();
+    }, () => this._menuActive && !this._infoPopup);
+this._menuUpdateLogBtn = this.add.image(screenWidth - 30 - 50, 33, "GJ_GameSheet03", "GJ_infoIcon_001.png").setScrollFactor(0).setDepth(30).setScale(0.64).setTint(Phaser.Display.Color.GetColor(255, 255, 255)).setInteractive();
+    this._expandHitArea(this._menuUpdateLogBtn, 1.5);
+    this._makeBouncyButton(this._menuUpdateLogBtn, 0.64, () => {
+      this._buildUpdateLogPopup();
+    }, () => this._menuActive && !this._updateLogPopup);
+    this._menuSettingsBtn = this.add.image(centerX + 92, screenHeight - 90, "GJ_GameSheet03", "GJ_optionsBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
     this._expandHitArea(this._menuSettingsBtn, 1);
     this._makeBouncyButton(this._menuSettingsBtn, 1, () => {
       this._showSettingsScreen();
     }, () => this._menuActive && !this._settingsPopup);
-    this._menuStatsBtn = this.add.image(centerX + 147, screenHeight - 90, "GJ_GameSheet03", "GJ_statsBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
+    this._menuStatsBtn = this.add.image(centerX + 202, screenHeight - 90, "GJ_GameSheet03", "GJ_statsBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
     this._expandHitArea(this._menuStatsBtn, 1);
     this._makeBouncyButton(this._menuStatsBtn, 1, () => {
       this._showStatsScreen();
     }, () => this._menuActive);
-    this._menuAchievementsBtn = this.add.image(centerX - 73, screenHeight - 90, "GJ_GameSheet03", "GJ_achBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive();
+    this._menuAchievementsBtn = this.add.image(centerX - 12, screenHeight - 90, "GJ_GameSheet03", "GJ_achBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive();
     this._expandHitArea(this._menuAchievementsBtn, 1);
     this._makeBouncyButton(this._menuAchievementsBtn, 1, () => {
+      this._showAchievementsScreen();
     }, () => this._menuActive);
-    this._menuDailyChestBtn = this.add.image(centerX + 630, screenHeight - 360, "GJ_GameSheet03", "GJ_dailyRewardBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive();
-    this._expandHitArea(this._menuDailyChestBtn, 1);
-    this._makeBouncyButton(this._menuDailyChestBtn, 1, () => {
-    }, () => this._menuActive);
-    this._menuNewgroundsBtn = this.add.image(centerX + 257, screenHeight - 90, "GJ_GameSheet03", "GJ_ngBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
+    this._menuNewgroundsBtn = this.add.image(centerX + 312, screenHeight - 90, "GJ_GameSheet03", "GJ_ngBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
     this._expandHitArea(this._menuNewgroundsBtn, 1);
     this._makeBouncyButton(this._menuNewgroundsBtn, 1, () => {
       this._buildNewgroundsPopup();
     }, () => this._menuActive && !this._newgroundsPopup);
-    this._menuMoreGamesBtn = this.add.image(screenWidth - 90, screenHeight - 90, "GJ_GameSheet04", "GJ_moreGamesBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive();
-    this._expandHitArea(this._menuMoreGamesBtn, 1);
-    this._makeBouncyButton(this._menuMoreGamesBtn, 1, () => {
-    }, () => this._menuActive);
+
+    this._menuGlitter = this.add.particles(0, 0, "GJ_WebSheet", {
+      frame: "square.png",
+      speed: 0,
+      scale: {
+        start: 0.5,
+        end: 0
+      },
+      alpha: {
+        start: 0.6,
+        end: 0.2
+      },
+      lifespan: {
+        min: 1000,
+        max: 2000
+      },
+      frequency: 35,
+      blendMode: S,
+      tint: 20670,
+      x: {
+        min: -130,
+        max: 130
+      },
+      y: {
+        min: -100,
+        max: 100
+      }
+    }).setScrollFactor(0).setDepth(29);
     this._playBtn = this.add.image(0, 0, "GJ_GameSheet04", "GJ_playBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive();
     this._playBtnPressed = false;
     this._makeBouncyButton(this._playBtn, 1, () => {
@@ -280,11 +693,12 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     this._creatorBtn = this.add.image(0, 0, "GJ_GameSheet04", "GJ_creatorBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setScale(1);
     this._creatorOverlay = null;
     this._creatorOverlayObjects = null;
+    this._creatorMenuDomOverlay = null;
 
     this._openCreatorMenu = () => {
       if (this._creatorOverlay) return;
+      this._uhdContext = 'creator';
       this._creatorMenuOpen = true;
-
       const sw = screenWidth;
       const sh = screenHeight;
 
@@ -351,126 +765,39 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       const rows = Math.ceil(menuButtons.length / cols);
       const gridH = rows * btnSize + (rows - 1) * gapY;
       const gridStartY = sh / 2 - gridH / 2 + btnSize / 2;
+
+      const _activeFrames = {
+        "GJ_searchBtn_001.png":    () => { this._closeCreatorMenu(true); this._openSearchMenu(); },
+        "GJ_featuredBtn_001.png":  () => { this._closeCreatorMenu(true); this._openOnlineLevelsScene({ type: 6 }); },
+        "GJ_createBtn_001.png":    () => { this._closeCreatorMenu(true); this._openEditorMenu(); },
+        "GJ_savedBtn_001.png":     () => { this._closeCreatorMenu(true); this._openSavedMenu(); },
+        "GJ_highscoreBtn_001.png": () => { window.open("https://webdemonlist.org/leaderboard", "_blank"); },
+        "GJ_challengeBtn_001.png": () => { this._buildQuestPopup(); },
+      };
+
       menuButtons.forEach((frame, idx) => {
         const col = idx % cols;
         const row = Math.floor(idx / cols);
         const bx = gridStartX + col * (btnSize + gapX);
         const by = gridStartY + row * (btnSize + gapY);
+        const cb = _activeFrames[frame];
         const btn = this.add.image(bx, by, "GJ_GameSheet04", frame)
-          .setScrollFactor(0).setDepth(104).setScale(btnScale);
-        const isSearchButton  = frame === "GJ_searchBtn_001.png";
-        const isFeaturedButton = frame === "GJ_featuredBtn_001.png";
-        const isSavedButton = frame === "GJ_savedBtn_001.png";
-        const isEditorButton = frame === "GJ_createBtn_001.png";
-        const isListsButton = frame === "GJ_listsBtn_001.png";
-        const isMapPacksButton = frame === "GJ_mapPacksBtn_001.png";
-        const isPathsButton = frame === "GJ_pathsBtn_001.png";
-        const isGauntletsButton = frame === "GJ_gauntletsBtn_001.png";
-        const isEventButton = frame === "GJ_eventBtn_001.png";
-        const isWeeklyButton = frame === "GJ_weeklyBtn_001.png";
-        const isDailyButton = frame === "GJ_dailyBtn_001.png";
-        const isMapButton = frame === "GJ_mapBtn_001.png";
-        const isVersusButton = frame === "GJ_versusBtn_001.png";
-        const isChallengeButton = frame === "GJ_challengeBtn_001.png";
-        const isHighscoreButton = frame === "GJ_highscoreBtn_001.png";
-        if (isSearchButton) {
+          .setScrollFactor(0).setDepth(103).setScale(btnScale);
+        if (!cb) btn.setAlpha(0.4);
+        if (cb) {
           btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeCreatorMenu(true);
-            this._openSearchMenu();
-          }, () => true);
-        } else if (isFeaturedButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeCreatorMenu(true);
-            this._openFeaturedMenu();
-          }, () => true);
-        } else if (isSavedButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeCreatorMenu(true);
-            this._openSavedMenu();
-          }, () => true);
-        } else if (isEditorButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeCreatorMenu(true);
-            this._openEditorMenu();
-          }, () => true);
-        } else if (isMapButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeMapMenu(true);
-            this._openMapMenu();
-          }, () => true);
-        } else if (isMapPacksButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeMapPacksMenu(true);
-            this._openMapPacksMenu();
-          }, () => true);
-        } else if (isGauntletsButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeGauntletsMenu(true);
-            this._openGauntletsMenu();
-          }, () => true);
-        } else if (isListsButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeListsMenu(true);
-            this._openListsMenu();
-          }, () => true);
-        } else if (isPathsButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closePathsMenu(true);
-            this._openPathsMenu();
-          }, () => true);
-        } else if (isDailyButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeDailyMenu(true);
-            this._openDailyMenu();
-          }, () => true);
-        } else if (isWeeklyButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeWeeklyMenu(true);
-            this._openWeeklyMenu();
-          }, () => true);
-        } else if (isEventButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeEventMenu(true);
-            this._openEventMenu();
-          }, () => true);
-        } else if (isHighscoreButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeHighscoreMenu(true);
-            this._openHighscoreMenu();
-          }, () => true);
-        } else if (isChallengeButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeChallengeMenu(true);
-            this._openChallengeMenu();
-          }, () => true);
-        } else if (isVersusButton) {
-          btn.setInteractive();
-          this._makeBouncyButton(btn, btnScale, () => {
-            this._closeVersusMenu(true);
-            this._openVersusMenu();
-          }, () => true);
+          this._makeBouncyButton(btn, btnScale, cb);
         }
         this._creatorOverlayObjects.push(btn);
       });
     };
+    this._savedOverlay = null;
     this._searchOverlay = null;
     this._searchOverlayObjects = [];
+    this._levelViewOverlay = null;
     this._openEditorMenu = () => {
         if (this._editorOverlay) return;
+        this._uhdContext = 'editor';
         const sw = screenWidth;
         const sh = screenHeight;
         const centerX = sw / 2;
@@ -559,12 +886,17 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
             const songIcon = this.add.image(tableX + 150, infoY, "GJ_GameSheet03", "GJ_musicIcon_001.png").setScale(0.65);
             const songTxt = this.add.bitmapText(songIcon.x + 22, infoY, "bigFont", level.song, 18).setOrigin(0, 0.5);
             const statusIcon = this.add.image(tableX + 380, infoY, "GJ_GameSheet03", "GJ_infoIcon_001.png").setScale(0.65).setFlipY(true).setAngle(90);
+            const songTxtMaxW = Math.max(20, (statusIcon.x - 25) - songTxt.x);
+            songTxt.setScale(1);
+            if (songTxt.width > songTxtMaxW) {
+                songTxt.setScale(songTxtMaxW / songTxt.width);
+            }
             const statusTxt = this.add.bitmapText(statusIcon.x + 22, infoY, "bigFont", level.status, 18).setOrigin(0, 0.5);
             
             const viewBtn = this.add.nineslice(tableX + tableW - 80, slotY, "GJ_button01", null, 120, 60, 24, 24, 24, 24 ).setScale(0.75).setInteractive();
             const viewTxt = this.add.bitmapText(viewBtn.x - 2, viewBtn.y - 1, "bigFont", "View", 32).setOrigin(0.5).setScale(0.8);
             
-            this._makeBouncyButton(viewBtn, 0.75, () => {
+            this._makeCompositeBouncyButton(viewBtn, [viewBtn, viewTxt], 0.75, () => {
                 this._closeEditorMenu(false);
                 this._openLevelView(level);
             });
@@ -574,12 +906,12 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         if (createdLevels.length === 0) {
             container.add(this.add.bitmapText(centerX, tableY + (tableH/2), "bigFont", "No Levels", 30).setOrigin(0.5).setAlpha(0.5));
         }
-        const sideFrame = this.textures.getFrame("GJ_WebSheet", "GJ_table_side_001.png");
+        const sideFrame = this.textures.getFrame("GJ_GameSheet03", "GJ_table_side_001.png");
         const sideScaleY = tableH / sideFrame.height;
-        container.add(this.add.image(tableX - 40, tableY, "GJ_WebSheet", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, sideScaleY));
-        container.add(this.add.image(tableX + tableW + 40, tableY, "GJ_WebSheet", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, sideScaleY));
-        container.add(this.add.image(centerX, tableY - 10, "GJ_WebSheet", "GJ_table_top_001.png"));
-        container.add(this.add.image(centerX, tableY + tableH + 20, "GJ_WebSheet", "GJ_table_bottom_001.png"));
+        container.add(this.add.image(tableX - 40, tableY, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, sideScaleY));
+        container.add(this.add.image(tableX + tableW + 40, tableY, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, sideScaleY));
+        container.add(this.add.image(centerX, tableY - 10, "GJ_GameSheet03", "GJ_table_top_001.png"));
+        container.add(this.add.image(centerX, tableY + tableH + 20, "GJ_GameSheet03", "GJ_table_bottom_001.png"));
         container.add(this.add.bitmapText(centerX, tableY - 15, "bigFont", "My Levels", 42).setOrigin(0.5).setScale(1.1));
 
         let startY = tableY;
@@ -767,36 +1099,87 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
 
         fileInput.click();
     };
+    this._escapeXml = (value) => {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&apos;");
+    };
+    this._decodeWebLevelStringForGMD = (levelString) => {
+        if (!levelString) return "";
+        try {
+            let base64 = String(levelString)
+                .trim()
+                .replace(/-/g, "+")
+                .replace(/_/g, "/");
+
+            while (base64.length % 4 !== 0) {
+                base64 += "=";
+            }
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return pako.inflate(bytes, { to: "string" });
+        } catch (err) {
+            console.warn("Why the fuck didnt it work", err);
+            return String(levelString);
+        }
+    };
     this._exportGMD = (level) => {
-        const encodedDesc = btoa(level.description || "");
+        const encodedDesc = btoa(unescape(encodeURIComponent(level.description || "")));
         const authorName = "Web Dashers";
-        
         const officialSong = level.songId < 0 ? Math.abs(level.songId) : 0;
         const customSong = level.songId > 0 ? level.songId : 0;
+        const rawLevelData = this._decodeWebLevelStringForGMD(level.levelString);
+        const safeName = this._escapeXml(level.levelName || "Unnamed");
+        const safeDesc = this._escapeXml(encodedDesc);
+        const safeAuthor = this._escapeXml(authorName);
+        const safeLevelData = this._escapeXml(rawLevelData);
 
-        let xml = '<?xml version="1.0"?>';
+        let xml = "";
+        xml += '<?xml version="1.0"?>';
         xml += '<plist version="1.0" gjver="2.0">';
         xml += '<dict>';
         xml += '<k>kCEK</k><i>4</i>';
-        xml += `<k>k1</k><i>${level.levelId && level.levelId !== "NA" ? level.levelId.replace(/\D/g, "") : 0}</i>`;
-        xml += `<k>k18</k><i>${level.levelLength || 0}</i>`;
-        xml += `<k>k23</k><i>${level.levelLength || 0}</i>`;
-        xml += `<k>k2</k><s>${level.levelName}</s>`;
-        xml += `<k>k4</k><s>${level.levelString}</s>`;
-        xml += `<k>k3</k><s>${encodedDesc}</s>`;
-        xml += `<k>k5</k><s>${authorName}</s>`;
-        xml += '<k>k101</k><s>0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0</s>';
+        xml += `<k>k1</k><i>${
+            level.levelId && level.levelId !== "NA"
+                ? String(level.levelId).replace(/\D/g, "")
+                : 0
+        }</i>`;
+        xml += `<k>k2</k><s>${safeName}</s>`;
+        xml += `<k>k3</k><s>${safeDesc}</s>`;
+        xml += `<k>k4</k><s>${safeLevelData}</s>`;
+        xml += `<k>k5</k><s>${safeAuthor}</s>`;
         xml += `<k>k8</k><i>${officialSong - 1}</i>`;
         xml += `<k>k45</k><i>${customSong}</i>`;
         xml += `<k>k16</k><i>${level.version || 1}</i>`;
-        xml += '<k>k13</k><t/><k>k21</k><i>2</i><k>k50</k><i>47</i>';
-        xml += '<k>kI1</k><r>0</r><k>kI2</k><r>0</r><k>kI3</k><r>0.1</r>';
-        xml += '<k>kI6</k><d><k>0</k><s>0</s><k>1</k><s>0</s><k>2</k><s>0</s><k>3</k><s>0</s><k>4</k><s>0</s><k>5</k><s>0</s><k>6</k><s>0</s><k>7</k><s>0</s><k>8</k><s>0</s><k>9</k><s>0</s><k>10</k><s>0</s><k>11</k><s>0</s><k>12</k><s>0</s><k>13</k><s>0</s></d>';
-        xml += '</dict></plist>';
-        const blob = new Blob([xml], { type: 'text/xml' });
+        xml += `<k>k18</k><i>${level.levelLength || 0}</i>`;
+        xml += `<k>k23</k><i>${level.levelLength || 0}</i>`;
+        xml += '<k>k13</k><t/>';
+        xml += '<k>k21</k><i>2</i>';
+        xml += '<k>k50</k><i>47</i>';
+        xml += '<k>k101</k><s>0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0</s>';
+        xml += '<k>kI1</k><r>0</r>';
+        xml += '<k>kI2</k><r>0</r>';
+        xml += '<k>kI3</k><r>0.1</r>';
+        xml += '<k>kI6</k><d>';
+        xml += '<k>0</k><s>0</s><k>1</k><s>0</s><k>2</k><s>0</s><k>3</k><s>0</s>';
+        xml += '<k>4</k><s>0</s><k>5</k><s>0</s><k>6</k><s>0</s><k>7</k><s>0</s>';
+        xml += '<k>8</k><s>0</s><k>9</k><s>0</s><k>10</k><s>0</s><k>11</k><s>0</s>';
+        xml += '<k>12</k><s>0</s><k>13</k><s>0</s>';
+        xml += '</d>';
+        xml += '</dict>';
+        xml += '</plist>';
+
+        const blob = new Blob([xml], { type: "text/xml" });
         const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        const fileName = `${level.levelName.replace(/[^a-z0-9]/gi, '_')}.gmd`;
+        const link = document.createElement("a");
+        const fileName = `${String(level.levelName || "Unnamed").replace(/[^a-z0-9]/gi, "_")}.gmd`;
+
         link.href = url;
         link.download = fileName;
         document.body.appendChild(link);
@@ -819,6 +1202,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         return "local_" + (maxId + 1);
     };
     this._openLevelView = (level) => {
+        this._uhdContext = 'levelView';
         const sw = screenWidth;
         const sh = screenHeight;
         const centerX = sw / 2;
@@ -857,6 +1241,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
             overlay.fillStyle(bandColor, 1);
             overlay.fillRect(0, Math.floor(gi * sh / gradientSteps), sw, Math.ceil(sh / gradientSteps) + 1);
         }
+        this._levelViewOverlay = overlay;
 
         const container = this.add.container(0, 0).setDepth(150);
         const boxWidth = sw * 0.6;
@@ -950,6 +1335,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
             container.destroy();
             overlay.destroy();
             blocker.destroy();
+            this._levelViewOverlay = null;
         };
 
         const btnY = sh * 0.58;
@@ -975,6 +1361,11 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         const songIcon = this.add.image(centerX - 160, footerY, "GJ_GameSheet03", "GJ_musicIcon_001.png").setScale(1).setDepth(152);
         const songLabel = this.add.bitmapText(centerX - 115, footerY, "bigFont", level.song, 29).setOrigin(0, 0.5).setDepth(152);
         const statusIcon = this.add.image(centerX + 200, footerY, "GJ_GameSheet03", "GJ_infoIcon_001.png").setScale(1).setDepth(152).setFlipY(true).setAngle(90);
+        const songLabelMaxW = Math.max(40, (statusIcon.x - 30) - songLabel.x);
+        songLabel.setScale(1);
+        if (songLabel.width > songLabelMaxW) {
+            songLabel.setScale(songLabelMaxW / songLabel.width);
+        }
         const statusLabel = this.add.bitmapText(centerX + 245, footerY, "bigFont", level.status, 33).setOrigin(0, 0.5).setDepth(152);
         const versionText = this.add.bitmapText(centerX - 180, subFooterY, "goldFont", `Version: ${level.version || 1}`, 30).setOrigin(0.5).setDepth(152);
         const idText = this.add.bitmapText(centerX + 180, subFooterY, "goldFont", `ID: ${level.levelId || "na"}`, 30).setOrigin(0.5).setDepth(152);
@@ -986,13 +1377,11 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         window._onlineLevelString = level.levelString;
         window._onlineLevelName = level.levelName;
         window._onlineLevelId = level.createdId;
-        window._onlineSongBuffer = null;
-        window._onlineSongKey = null;
+        if (!window._activeNongId) { window._onlineSongBuffer = null; window._onlineSongKey = null; }
         window._onlineSongOffset = 0;
         if (isEditor){
           window.isEditor = true;
         }
-        if (this._audio) this._audio.stopMusic();
         this.game.registry.set("autoStartGame", true);
         window.currentlevel = [
             "Placeholder",
@@ -1001,15 +1390,42 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
             ["Local", "SongAuthor"]
         ];
         if (level.songId < 0){
-          window.currentlevel[0] = window.allLevels[Math.abs(level.songId) - 1][0];
-          window.currentlevel[3] = ["Local", window.allLevels[Math.abs(level.songId) - 1][3]]
+          const mainLevel = window.allLevels[Math.abs(level.songId) - 1];
+          window.currentlevel[0] = mainLevel[0];
+          window.currentlevel[3] = ["Local", mainLevel[3]];
+          const songKey = mainLevel[0];
+          if (!this.cache.audio.exists(songKey)) {
+            const songFileName = mainLevel[1].replaceAll(" ", "");
+            await new Promise((resolve) => {
+              this.load.audio(songKey, "assets/music/" + songFileName + ".mp3");
+              this.load.once("complete", resolve);
+              this.load.start();
+            });
+          }
         } else {
           const songId = level.songId;
+          const LOCAL_SONGS = {
+            "467339": { file: "Bloodbath.mp3", artist: "Dimrain47" }
+          };
+
+          if (LOCAL_SONGS[String(songId)]) {
+            const localSong = LOCAL_SONGS[String(songId)];
+            const localKey = `local_song_${songId}`;
+            window.currentlevel[0] = localKey;
+            if (!this.cache.audio.exists(localKey)) {
+              await new Promise((resolve) => {
+                this.load.audio(localKey, "assets/music/" + localSong.file);
+                this.load.once("complete", resolve);
+                this.load.start();
+              });
+            }
+            window.currentlevel[3] = ["Local", localSong.artist];
+          } else {
           const songKey = `ng_song_${songId}`;
           window.currentlevel[0] = songKey;
-          
+
           if (PROXY_BASE && songId > 0) {
-              try {                  
+              try {
                   const ngRes = await fetch(`${PROXY_BASE}/getGJSongInfo.php`, {
                       method: "POST",
                       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -1029,15 +1445,17 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
                       if (songUrl) {
                           const audioCtx = this.game.sound.context;
                           if (audioCtx.state === "suspended") await audioCtx.resume();
-                          const proxiedUrl = `${PROXY_BASE}/audio-proxy?url=${encodeURIComponent(songUrl)}`;
-                          const audioRes = await fetch(proxiedUrl);
+                          const fetchUrl = songUrl.includes("b-cdn.net")
+                            ? (window.ApiWrapper ? window.ApiWrapper.getProxy() : "https://proxy.corsfix.com/?") + songUrl
+                            : `${PROXY_BASE}/audio-proxy?url=${encodeURIComponent(songUrl)}`;
+                          const audioRes = await fetch(fetchUrl);
+                          if (!audioRes.ok) throw new Error(`audio fetch returned ${audioRes.status}`);
                           const arrayBuf = await audioRes.arrayBuffer();
                           const decoded = await audioCtx.decodeAudioData(arrayBuf);
                           window._onlineSongBuffer = decoded;
                           window._onlineSongKey = songKey;
                           window._onlineSongTitle = songTitle;
                           window._onlineSongArtist = songArtist;
-                          
                           window.currentlevel[3] = ["Local", window._onlineSongArtist]
                       }
                   }
@@ -1045,6 +1463,10 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
                   console.warn("Failed to load custom song", err);
               }
           }
+          }
+        }
+        if (window._activeNongId && window._onlineSongBuffer) {
+          window._onlineSongKey = window.currentlevel[0];
         }
         this.scene.restart();
     };
@@ -1055,119 +1477,288 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         this._editorOverlay = null;
         this._editorObjects = null;
     };
-    // Track the active scene so WDSearch.playLevel() can find it
-    window._wdActiveScene = this;
+    this._savedCurrentFolder = null;
+    this._openSavedMenu = (folder = null) => {
+      if (this._savedOverlay) return;
+      this._uhdContext = 'saved';
+      this._savedCurrentFolder = folder;
+      const sw = screenWidth;
+      const sh = screenHeight;
+      const centerX = sw / 2;
 
-    // shared close/play message handling for any full-screen gdbrowser iframe
-    // (search.html -> results.html, or results.html opened directly for featured)
-    const _ensureWdMsgListener = () => {
-      if (window._wdMsgListenerAdded) return;
-      window._wdMsgListenerAdded = true;
-      window.addEventListener('message', function(e) {
-        const scene = window._wdActiveScene;
-        if (!scene) return;
-        if (e.data && e.data.type === 'WD_CLOSE_SEARCH') {
-          const f = document.getElementById('wd-search-iframe');
-          if (f) f.remove();
-          window._wdSearchFrame = null;
-          try { scene.input.keyboard.enableGlobalCapture(); } catch(e){}
-          try { scene.input.keyboard.enabled = true; } catch(e){}
-          try { scene.input.enabled = true; } catch(e){}
-          const menuMusicEnabled = localStorage.getItem("menuMusicEnabled");
-          const shouldPlayMenuMusic = menuMusicEnabled === null ? true : menuMusicEnabled === "true";
-          if (e.data.returnTo === 'creator') {
-            localStorage.removeItem('gdbrowserMenuAudioPos');
-            if (scene._audio && shouldPlayMenuMusic) {
-              scene._audio.startMenuMusic();
-            }
-            try { scene._openCreatorMenu(); } catch(e){}
-          } else {
-            if (scene._audio && !scene._audio.isplaying() && shouldPlayMenuMusic) {
-              scene._audio.startMenuMusic();
-            }
-          }
-        }
-        if (e.data && e.data.type === 'WD_PLAY_LEVEL') {
-          const f = document.getElementById('wd-search-iframe');
-          if (f) f.remove();
-          window._wdSearchFrame = null;
-          try { scene.input.keyboard.enableGlobalCapture(); } catch(e){}
-          try { scene.input.keyboard.enabled = true; } catch(e){}
-          try { scene.input.enabled = true; } catch(e){}
-          if (scene._audio) try { scene._audio.stopMusic(); } catch(e){}
-          localStorage.removeItem('gdbrowserMenuAudioPos');
-          window.levelID = String(e.data.id);
-          window.alreadydownloaded = false;
-          scene._openSearchMenu();
+      const fadeIn = this.add.graphics().setScrollFactor(0).setDepth(200);
+      fadeIn.fillStyle(0x000000, 1);
+      fadeIn.fillRect(0, 0, sw, sh);
+      this.tweens.add({ targets: fadeIn, alpha: 0, duration: 300, ease: "Linear", onComplete: () => fadeIn.destroy() });
+
+      const overlay = this.add.graphics().setScrollFactor(0).setDepth(100);
+      const gradientSteps = 80;
+      for (let gi = 0; gi < gradientSteps; gi++) {
+        const t = gi / (gradientSteps - 1);
+        const r1 = Math.round(0x00 + (0x01 - 0x00) * t);
+        const g1 = Math.round(0x65 + (0x2c - 0x65) * t);
+        const b1 = Math.round(0xff + (0x71 - 0xff) * t);
+        const bandColor = (r1 << 16) | (g1 << 8) | b1;
+        overlay.fillStyle(bandColor, 1);
+        overlay.fillRect(0, Math.floor(gi * sh / gradientSteps), sw, Math.ceil(sh / gradientSteps) + 1);
+      }
+      this._savedOverlay = overlay;
+
+      const blocker = this.add.zone(centerX, sh / 2, sw, sh).setScrollFactor(0).setDepth(101).setInteractive();
+      const container = this.add.container(0, 0).setScrollFactor(0).setDepth(102);
+
+      const tableW = 712;
+      const tableH = 460;
+      const tableX = (sw - tableW) / 2;
+      const tableY = 85;
+
+      const allLevels = JSON.parse(localStorage.getItem("saved_levels") || "[]");
+      const folders = JSON.parse(localStorage.getItem("saved_folders") || "[]");
+      const lengthValues = ["Tiny", "Short", "Medium", "Long", "XL"];
+
+      const listContainer = this.add.container(0, 0);
+      const maskShape = this.add.graphics().fillStyle(0xffffff).fillRect(tableX, tableY, tableW, tableH).setVisible(false);
+      const mask = maskShape.createGeometryMask();
+      listContainer.setMask(mask);
+      container.add(this.add.graphics().setScrollFactor(0).setDepth(90).fillStyle(0xc2723e, 1).fillRect(tableX, tableY, tableW, tableH));
+      container.add(listContainer);
+
+      const spacing = 100;
+      let rowIndex = 0;
+
+      if (!folder) {
+        folders.forEach((folderName) => {
+          const slotY = (rowIndex * spacing) + (spacing / 2);
+          const stripeColor = rowIndex % 2 !== 0 ? 0xc2723e : 0xa1582c;
+          const levelCount = allLevels.filter(l => l.folder === folderName).length;
+
+          const bgStripe = this.add.rectangle(centerX, slotY, tableW - 10, spacing, stripeColor, 1);
+          const separator = this.add.rectangle(centerX, slotY + (spacing / 2), tableW - 10, 1, 0x502c16, 1);
+          const folderIcon = this.add.bitmapText(tableX + 20, slotY - 5, "bigFont", ">", 36).setOrigin(0, 0.5).setTint(0xffcc00);
+          const nameTxt = this.add.bitmapText(tableX + 45, slotY - 5, "bigFont", folderName, 36).setOrigin(0, 0.5).setTint(0xffcc00);
+          const countTxt = this.add.bitmapText(tableX + 45, slotY + 28, "bigFont", levelCount + " level" + (levelCount !== 1 ? "s" : ""), 18).setOrigin(0, 0.5).setAlpha(0.7);
+
+          const openBtn = this.add.nineslice(tableX + tableW - 80, slotY - 5, "GJ_button01", null, 120, 60, 24, 24, 24, 24).setScale(0.75).setInteractive();
+          const openTxt = this.add.bitmapText(openBtn.x - 2, openBtn.y - 1, "bigFont", "Open", 32).setOrigin(0.5).setScale(0.8);
+          this._makeBouncyButton(openBtn, 0.75, () => {
+            this._closeSavedMenu(true);
+            this._openSavedMenu(folderName);
+          });
+
+          const delFolderBtn = this.add.nineslice(tableX + tableW - 80, slotY + 32, "GJ_button01", null, 80, 40, 24, 24, 24, 24).setScale(0.55).setInteractive().setTint(0xff4444);
+          const delFolderTxt = this.add.bitmapText(delFolderBtn.x - 2, delFolderBtn.y - 1, "bigFont", "Del", 24).setOrigin(0.5).setScale(0.7);
+          this._makeBouncyButton(delFolderBtn, 0.55, () => {
+            const curFolders = JSON.parse(localStorage.getItem("saved_folders") || "[]");
+            localStorage.setItem("saved_folders", JSON.stringify(curFolders.filter(f => f !== folderName)));
+            const levels = JSON.parse(localStorage.getItem("saved_levels") || "[]");
+            levels.forEach(l => { if (l.folder === folderName) l.folder = null; });
+            localStorage.setItem("saved_levels", JSON.stringify(levels));
+            this._closeSavedMenu(true);
+            this._openSavedMenu();
+          });
+
+          listContainer.add([bgStripe, separator, folderIcon, nameTxt, countTxt, openBtn, openTxt, delFolderBtn, delFolderTxt]);
+          rowIndex++;
+        });
+      }
+
+      const visibleLevels = folder
+        ? allLevels.filter(l => l.folder === folder)
+        : allLevels.filter(l => !l.folder);
+
+      visibleLevels.forEach((level) => {
+        const slotY = (rowIndex * spacing) + (spacing / 2);
+        const stripeColor = rowIndex % 2 !== 0 ? 0xc2723e : 0xa1582c;
+
+        const bgStripe = this.add.rectangle(centerX, slotY, tableW - 10, spacing, stripeColor, 1);
+        const separator = this.add.rectangle(centerX, slotY + (spacing / 2), tableW - 10, 1, 0x502c16, 1);
+        const nameTxt = this.add.bitmapText(tableX + 20, slotY - 22, "bigFont", level.levelName || "Unknown", 32).setOrigin(0, 0.5);
+        const infoY = slotY + 18;
+        const authorTxt = this.add.bitmapText(tableX + 20, infoY, "bigFont", "By " + (level.author || "Unknown"), 18).setOrigin(0, 0.5);
+        const lenIcon = this.add.image(tableX + 250, infoY, "GJ_GameSheet03", "GJ_timeIcon_001.png").setScale(0.65);
+        const lenTxt = this.add.bitmapText(lenIcon.x + 22, infoY, "bigFont", lengthValues[level.levelLength] || "NA", 18).setOrigin(0, 0.5);
+
+        const viewBtn = this.add.nineslice(tableX + tableW - 80, slotY - 15, "GJ_button01", null, 120, 60, 24, 24, 24, 24).setScale(0.65).setInteractive();
+        const viewTxt = this.add.bitmapText(viewBtn.x - 2, viewBtn.y - 1, "bigFont", "View", 28).setOrigin(0.5).setScale(0.8);
+        this._makeBouncyButton(viewBtn, 0.65, () => {
+          const levelData = {
+            id: (level.savedId || "").replace("online_", ""),
+            title: level.levelName || "Unknown",
+            author: level.author || "Unknown",
+            difficulty: 0,
+            stars: level.stars || 0,
+            downloads: level.downloads || 0,
+            likes: level.likes || 0,
+            length: level.levelLength || 0,
+            description: level.description || "",
+            orbs: 0,
+            officialSong: "0",
+            customSongID: level.songId > 0 ? String(level.songId) : "0",
+            isCustomSong: level.songId > 0,
+          };
+          window._onlineLevelString = level.levelString;
+          window._onlineLevelName = level.levelName;
+          window._onlineLevelId = level.savedId;
+          window._onlineSongTitle = level.song || "Unknown";
+          window._onlineSongArtist = "Unknown";
+          const songKey = level.songId > 0 ? `ng_song_${level.songId}` : (window.allLevels[Math.abs(level.songId) - 1] || ["unknown"])[0];
+          window.currentlevel = [songKey, level.levelName, level.savedId, ["Unknown"]];
+          const onPlay = () => {
+            this._closeLevelInfoPage();
+            this._closeSavedMenu(false);
+            this._startCreatedLevel(level, false);
+          };
+          this._showLevelInfoPage(levelData, songKey, onPlay);
+        });
+
+        const moveBtn = this.add.nineslice(tableX + tableW - 135, slotY + 25, "GJ_button01", null, 80, 40, 24, 24, 24, 24).setScale(0.55).setInteractive().setTint(0x4488ff);
+        const moveTxt = this.add.bitmapText(moveBtn.x - 2, moveBtn.y - 1, "bigFont", "Move", 24).setOrigin(0.5).setScale(0.7);
+        this._makeBouncyButton(moveBtn, 0.55, () => {
+          this._showFolderPicker(level.savedId, folder);
+        });
+
+        const deleteBtn = this.add.nineslice(tableX + tableW - 55, slotY + 25, "GJ_button01", null, 80, 40, 24, 24, 24, 24).setScale(0.55).setInteractive().setTint(0xff4444);
+        const deleteTxt = this.add.bitmapText(deleteBtn.x - 2, deleteBtn.y - 1, "bigFont", "Del", 24).setOrigin(0.5).setScale(0.7);
+        this._makeBouncyButton(deleteBtn, 0.55, () => {
+          const levels = JSON.parse(localStorage.getItem("saved_levels") || "[]");
+          localStorage.setItem("saved_levels", JSON.stringify(levels.filter(l => l.savedId !== level.savedId)));
+          this._closeSavedMenu(true);
+          this._openSavedMenu(folder);
+        });
+
+        listContainer.add([bgStripe, separator, nameTxt, authorTxt, lenIcon, lenTxt, viewBtn, viewTxt, moveBtn, moveTxt, deleteBtn, deleteTxt]);
+        rowIndex++;
+      });
+
+      if (rowIndex === 0) {
+        container.add(this.add.bitmapText(centerX, tableY + (tableH / 2), "bigFont", folder ? "Empty Folder" : "No Saved Levels", 30).setOrigin(0.5).setAlpha(0.5));
+      }
+
+      const sideFrame = this.textures.getFrame("GJ_GameSheet03", "GJ_table_side_001.png");
+      const sideScaleY = tableH / sideFrame.height;
+      container.add(this.add.image(tableX - 40, tableY, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, sideScaleY));
+      container.add(this.add.image(tableX + tableW + 40, tableY, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, sideScaleY));
+      container.add(this.add.image(centerX, tableY - 10, "GJ_GameSheet03", "GJ_table_top_001.png"));
+      container.add(this.add.image(centerX, tableY + tableH + 20, "GJ_GameSheet03", "GJ_table_bottom_001.png"));
+      container.add(this.add.bitmapText(centerX, tableY - 15, "bigFont", folder ? folder : "Saved Levels", 42).setOrigin(0.5).setScale(1.1));
+
+      const newFolderBtn = this.add.image(sw - 60, sh - 55, "GJ_GameSheet03", "gj_folderBtn_001.png")
+        .setScale(0.9).setScrollFactor(0).setDepth(104).setInteractive();
+      this._makeBouncyButton(newFolderBtn, 0.9, () => {
+        const name = prompt("Folder name:");
+        if (!name || !name.trim()) return;
+        const curFolders = JSON.parse(localStorage.getItem("saved_folders") || "[]");
+        if (curFolders.includes(name.trim())) return;
+        curFolders.push(name.trim());
+        localStorage.setItem("saved_folders", JSON.stringify(curFolders));
+        this._closeSavedMenu(true);
+        this._openSavedMenu(folder);
+      });
+
+      let startY = tableY;
+      const listHeight = rowIndex * spacing;
+      const minY = tableY - Math.max(0, listHeight - tableH) - 10;
+      const maxY = tableY + 22;
+
+      listContainer.y = maxY;
+      this._savedScrollTargetY = maxY;
+      const onWheel = (pointer, gameObjects, deltaX, deltaY) => {
+        if (!this._savedOverlay) return;
+        this._savedScrollTargetY -= deltaY;
+        this._savedScrollTargetY = Phaser.Math.Clamp(this._savedScrollTargetY, minY, maxY);
+        this.tweens.add({
+          targets: listContainer,
+          y: this._savedScrollTargetY,
+          duration: 250,
+          ease: 'Power2',
+          overwrite: true
+        });
+      };
+      this.input.on('wheel', onWheel);
+
+      blocker.on('pointerdown', (pointer) => { startY = pointer.y - listContainer.y; });
+      blocker.on('pointermove', (pointer) => {
+        if (pointer.isDown) {
+          listContainer.y = Phaser.Math.Clamp(pointer.y - startY, minY, maxY);
         }
       });
-    };
 
-    // featured tab: same full-screen iframe approach as search, just pointed
-    // straight at results.html in featured mode (type=6) instead of search.html
-    this._openFeaturedMenu = () => {
-      if (window._wdSearchFrame) return; // already open
-      if (this._audio && this._audio._music) {
-        localStorage.setItem('gdbrowserMenuAudioPos', String(this._audio._music.seek || 0));
-      }
-      if (this._audio) this._audio.stopMusic();
-      try { this.input.keyboard.disableGlobalCapture(); } catch(e){}
-      try { this.input.keyboard.enabled = false; } catch(e){}
-      try { this.input.enabled = false; } catch(e){}
-
-      const frame = document.createElement('iframe');
-      frame.id = 'wd-search-iframe';
-      frame.src = './gdbrowser/featured.html?v=' + Date.now();
-      frame.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;border:none;z-index:9999;background:#000;';
-      document.body.appendChild(frame);
-      window._wdSearchFrame = frame;
-      _ensureWdMsgListener();
-    };
-
-    // saved levels tab - same iframe pattern, points at saved.html
-    this._openSavedMenu = () => {
-      if (window._wdSearchFrame) return; // already open
-      if (this._audio && this._audio._music) {
-        localStorage.setItem('gdbrowserMenuAudioPos', String(this._audio._music.seek || 0));
-      }
-      if (this._audio) this._audio.stopMusic();
-      try { this.input.keyboard.disableGlobalCapture(); } catch(e){}
-      try { this.input.keyboard.enabled = false; } catch(e){}
-      try { this.input.enabled = false; } catch(e){}
-
-      const frame = document.createElement('iframe');
-      frame.id = 'wd-search-iframe';
-      frame.src = './gdbrowser/saved.html?v=' + Date.now();
-      frame.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;border:none;z-index:9999;background:#000;';
-      document.body.appendChild(frame);
-      window._wdSearchFrame = frame;
-      _ensureWdMsgListener();
-    };
-
-    this._openSearchMenu = () => {
-      // If launched with ?id=levelID, download that level directly (no iframe)
-      if (!window.levelID) {
-        // Open search as a full-screen iframe overlay
-        if (window._wdSearchFrame) return; // already open
-        if (this._audio && this._audio._music) {
-          localStorage.setItem('gdbrowserMenuAudioPos', String(this._audio._music.seek || 0));
+      const backBtn = this.add.image(50, 48, "GJ_GameSheet03", "GJ_arrow_03_001.png")
+        .setScrollFactor(0).setDepth(104).setFlipX(true).setFlipY(true).setRotation(Math.PI).setInteractive();
+      this._makeBouncyButton(backBtn, 1, () => {
+        if (folder) {
+          this._closeSavedMenu(true);
+          this._openSavedMenu();
+        } else {
+          this._closeSavedMenu();
+          this._openCreatorMenu();
         }
-        if (this._audio) this._audio.stopMusic();
-        try { this.input.keyboard.disableGlobalCapture(); } catch(e){}
-        try { this.input.keyboard.enabled = false; } catch(e){}
-        try { this.input.enabled = false; } catch(e){}
-        const frame = document.createElement('iframe');
-        frame.id = 'wd-search-iframe';
-        frame.src = './gdbrowser/search.html?v=' + Date.now();
-        frame.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;border:none;z-index:9999;background:#000;';
-        document.body.appendChild(frame);
-        window._wdSearchFrame = frame;
+      });
 
-        // Listen for messages from the iframe
-        _ensureWdMsgListener();
-        return;
+      this._savedObjects = [overlay, blocker, container, backBtn, maskShape, newFolderBtn, { destroy: () => this.input.off('wheel', onWheel) }];
+    };
+    this._showFolderPicker = (levelSavedId, currentFolder) => {
+      const sw = screenWidth;
+      const sh = screenHeight;
+      const folders = JSON.parse(localStorage.getItem("saved_folders") || "[]");
+      const options = [{ label: "No Folder", value: null }, ...folders.map(f => ({ label: f, value: f }))];
+      const popupW = 300;
+      const popupH = Math.min(50 + options.length * 45, 400);
+      const popupX = sw / 2 - popupW / 2;
+      const popupY = sh / 2 - popupH / 2;
+      const popupObjects = [];
+
+      const dimmer = this.add.graphics().setScrollFactor(0).setDepth(150);
+      dimmer.fillStyle(0x000000, 0.6);
+      dimmer.fillRect(0, 0, sw, sh);
+      const dimBlocker = this.add.zone(sw / 2, sh / 2, sw, sh).setScrollFactor(0).setDepth(151).setInteractive();
+      popupObjects.push(dimmer, dimBlocker);
+
+      const bg = this.add.graphics().setScrollFactor(0).setDepth(152);
+      bg.fillStyle(0x002e75, 0.95);
+      bg.fillRoundedRect(popupX, popupY, popupW, popupH, 12);
+      popupObjects.push(bg);
+
+      const title = this.add.bitmapText(sw / 2, popupY + 20, "bigFont", "Move to Folder", 24).setScrollFactor(0).setDepth(153).setOrigin(0.5);
+      popupObjects.push(title);
+
+      const cleanup = () => { popupObjects.forEach(o => { if (o && o.destroy) o.destroy(); }); };
+
+      options.forEach((opt, i) => {
+        const btnY = popupY + 55 + i * 45;
+        const isActive = opt.value === currentFolder;
+        const btn = this.add.nineslice(sw / 2, btnY, "GJ_button01", null, 240, 38, 24, 24, 24, 24)
+          .setScrollFactor(0).setDepth(153).setInteractive();
+        if (isActive) btn.setTint(0x44aa44);
+        const lbl = this.add.bitmapText(sw / 2, btnY - 1, "bigFont", opt.label, 22)
+          .setScrollFactor(0).setDepth(154).setOrigin(0.5);
+        this._makeBouncyButton(btn, 1, () => {
+          const levels = JSON.parse(localStorage.getItem("saved_levels") || "[]");
+          const lvl = levels.find(l => l.savedId === levelSavedId);
+          if (lvl) {
+            lvl.folder = opt.value;
+            localStorage.setItem("saved_levels", JSON.stringify(levels));
+          }
+          cleanup();
+          this._closeSavedMenu(true);
+          this._openSavedMenu(this._savedCurrentFolder);
+        });
+        popupObjects.push(btn, lbl);
+      });
+
+      dimBlocker.on("pointerup", () => cleanup());
+    };
+    this._closeSavedMenu = (silent = false) => {
+      if (!this._savedOverlay) return;
+      if (this._savedObjects) {
+        this._savedObjects.forEach(obj => { if (obj && obj.destroy) obj.destroy(); });
       }
+      this._savedOverlay = null;
+      this._savedObjects = null;
+    };
+    this._openSearchMenu = () => {
       if (this._searchOverlay) return;
+      this._uhdContext = 'search';
       const sw = screenWidth;
       const sh = screenHeight;
 
@@ -1347,6 +1938,11 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         get value() { return inputText; },
       };
       const _repositionInput = () => {};
+      let _activeDiff = [];
+      let _activeDemonFilter = null;
+      let _activeLen = [];
+      let _activeStar = false;
+
       const qsLabelY  = sh * 0.195;
       const qsPanelY  = qsLabelY + 25;
       const qsPanelH  = sh * 0.36;
@@ -1355,381 +1951,500 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
 
       gfx.fillStyle(panelColor, panelAlpha);
       gfx.fillRoundedRect(panelLeft, qsPanelY, panelW, qsPanelH, panelRadius);
-
-      // ── Quick Search buttons ─────────────────────────────────────────────────
-      // 3 cols × 3 rows. Icon on RIGHT of text, matching GDBrowser exactly.
-      // Text center at -0.14*btnW, icon center at +0.34*btnW from container centre.
-      // Icon target height = 0.45*btnH (near-native size for 30px sprites).
-      const _qsSearchObjects = [];
-      const _qsBtnDefs = [
-        { label: "Downloads", icon: "GJ_sDownloadIcon_001.png" },
-        { label: "Likes",      icon: "GJ_sLikeIcon_001.png"    },
-        { label: "Sent",       icon: "GJ_sModIcon_001.png"     },
-        { label: "Trending",   icon: "GJ_sTrendingIcon_001.png"},
-        { label: "Recent",     icon: "GJ_sRecentIcon_001.png"  },
-        { label: "Magic",      icon: "GJ_sMagicIcon_001.png"   },
-        { label: "Awarded",    icon: "GJ_sStarsIcon_001.png"   },
-        { label: "Followed",   icon: "GJ_sFollowedIcon_001.png"},
-        { label: "More",       icon: "GJ_arrow_03_001.png", teal: true },
-      ];
-      const _qsCols  = 3;
-      const _qsBtnW  = panelW * 0.285;          // fits 3 cols with gaps
-      const _qsBtnH  = _qsBtnW * (61 / 184);   // longBtn01 native aspect
-      const _qsGapX  = (panelW - _qsCols * _qsBtnW) / (_qsCols + 1);
-      const _qsRows  = Math.ceil(_qsBtnDefs.length / _qsCols);
-      const _qsGapY  = (qsPanelH - _qsRows * _qsBtnH) / (_qsRows + 1);
-      const _qsSclX  = _qsBtnW / 184;
-      const _qsSclY  = _qsBtnH / 61;
-
-      _qsBtnDefs.forEach((def, idx) => {
-        const col = idx % _qsCols;
-        const row = Math.floor(idx / _qsCols);
-        const bx  = panelLeft + _qsGapX + col * (_qsBtnW + _qsGapX) + _qsBtnW / 2;
-        const by  = qsPanelY  + _qsGapY + row * (_qsBtnH + _qsGapY) + _qsBtnH / 2;
-
-        const ct = this.add.container(bx, by).setScrollFactor(0).setDepth(106);
-
-        // Background
-        const bgFrame = def.teal ? "GJ_longBtn02_001.png" : "GJ_longBtn01_001.png";
-        const bg = this.add.image(0, 0, "GJ_GameSheet03", bgFrame)
-          .setOrigin(0.5, 0.5).setScale(_qsSclX, _qsSclY);
-        ct.add(bg);
-
-        if (def.icon) {
-          // Layout: text left, icon right, combined width centred in button
-          // Phaser auto-corrects atlas rotation — do NOT call setAngle on these.
-          const lbl = this.add.bitmapText(0, 0, "bigFont", def.label, 22)
-            .setOrigin(0, 0.5).setTint(0xffffff);
-
-          // Some icons render mirrored due to atlas packing — flip them back
-          const _flipXIcons = new Set([
-            "GJ_arrow_03_001.png",
-            "GJ_sLikeIcon_001.png",
-            "GJ_sFollowedIcon_001.png",
-            "GJ_sRecentIcon_001.png",
-          ]);
-          const ic = this.add.image(0, 0, "GJ_GameSheet03", def.icon)
-            .setOrigin(1, 0.5);
-          if (_flipXIcons.has(def.icon)) { ic.setFlipX(true); }
-          ic.setScale(1.1);
-
-          // displayWidth already includes the scale — do NOT multiply again
-          const _gap = 5.5;
-          const _totalW = lbl.width + ic.displayWidth + _gap;
-          lbl.x = -_totalW / 2;
-          ic.x  =  _totalW / 2;
-          lbl.y = -1;
-          ic.y  = 0;
-
-          ct.add(lbl);
-          ct.add(ic);
-        } else {
-          // No icon: label dead-centre
-          const lbl = this.add.bitmapText(0, 0, "bigFont", def.label, 22)
-            .setOrigin(0.5, 0.5).setTint(0xffffff);
-          ct.add(lbl);
-        }
-
-        // Hit zone
-        const hz = this.add.zone(0, 0, _qsBtnW, _qsBtnH).setOrigin(0.5, 0.5).setInteractive();
-        ct.add(hz);
-        hz.on("pointerdown", () => {
-          hz._dn = true;
-          this.tweens.killTweensOf(ct);
-          this.tweens.add({ targets: ct, scale: 1.15, duration: 80, ease: "Quad.Out" });
-        });
-        hz.on("pointerup", () => {
-          if (!hz._dn) return; hz._dn = false;
-          this.tweens.killTweensOf(ct);
-          this.tweens.add({ targets: ct, scale: 1, duration: 400, ease: "Bounce.Out" });
-        });
-        hz.on("pointerout", () => {
-          if (!hz._dn) return; hz._dn = false;
-          this.tweens.killTweensOf(ct);
-          this.tweens.add({ targets: ct, scale: 1, duration: 250, ease: "Back.Out" });
-        });
-
-        _qsSearchObjects.push(ct);
-      });
-
-      // ── Filters label + panel ─────────────────────────────────────────────────
-      const filtersLabelY = qsPanelY + qsPanelH + 24;
-      const filtersPanelY = filtersLabelY + 20;
-      const filtersPanelH = sh * 0.195;
-      const filtersLabel  = this.add.bitmapText(sw / 2, filtersLabelY, "bigFont", "Filters", labelSize)
+      const filtersLabelY  = qsPanelY + qsPanelH + 24;
+      const filtersPanelY  = filtersLabelY + 20;
+      const filtersPanelH  = sh * 0.16;
+      const filtersLabel   = this.add.bitmapText(sw / 2, filtersLabelY, "bigFont", "Filters", labelSize)
         .setScrollFactor(0).setDepth(105).setOrigin(0.5, 0.5).setTint(labelColor);
 
       gfx.fillStyle(filtersPanelColor, panelAlpha);
       gfx.fillRoundedRect(panelLeft, filtersPanelY, panelW, filtersPanelH, panelRadius);
 
-      // ── Difficulty icons ──────────────────────────────────────────────────────
-      // All 60x60 except diffIcon_06 (64x67 rotated), _09 (74x65 rotated).
-      // Use displayHeight for correct post-rotation scale.
-      // Demon (06) click expands to show 5 sub-type demons inline.
-      const _diffDefs = [
-        { frame: "diffIcon_00_btn_001.png", label: "N/A"    },
-        { frame: "diffIcon_01_btn_001.png", label: "Easy"   },
-        { frame: "diffIcon_02_btn_001.png", label: "Normal" },
-        { frame: "diffIcon_03_btn_001.png", label: "Hard"   },
-        { frame: "diffIcon_04_btn_001.png", label: "Harder" },
-        { frame: "diffIcon_05_btn_001.png", label: "Insane" },
-        { frame: "diffIcon_06_btn_001.png", label: "Demon", isDemon: true },
-        { frame: "diffIcon_auto_btn_001.png", label: "Auto" },
-      ];
-      // Demon sub-types (shown instead of normal row when demon is clicked)
-      // difficulty_07/08/06 are rot=True in atlas — need setAngle(-90) to correct.
-      // difficulty_09/10 are rot=False and render upright with no correction.
-      // diffIcon_09 used for Insane because difficulty_09 bakes in "DEMON" text.
-      const _demonDefs = [
-        { frame: "difficulty_07_btn_001.png", label: "", needsAngle: true  },  // Easy
-        { frame: "difficulty_08_btn_001.png", label: "", needsAngle: true  },  // Medium
-        { frame: "difficulty_06_btn_001.png", label: "", needsAngle: true  },  // Hard
-        { frame: "diffIcon_09_btn_001.png",   label: "Insane", needsAngle: false }, // Insane
-        { frame: "difficulty_10_btn_001.png", label: "", needsAngle: false },  // Extreme
-      ];
-
-      const _diffCount  = _diffDefs.length;
-      const _diffPadX   = panelW * 0.025;
-      const _diffSlotW  = (panelW - _diffPadX * 2) / _diffCount;
-      const _diffIconH  = Math.min(_diffSlotW * 0.72, filtersPanelH * 0.52);
-      const _diffIconY  = filtersPanelY + filtersPanelH * 0.34;
-      const _diffLabelY = filtersPanelY + filtersPanelH * 0.70;
-      const _diffObjects = [];
-
-      // Track which normal diff icons exist so we can hide/show them
-      const _normalDiffGroups = []; // [{icon, lbl, zone}]
-      const _demonDiffGroups  = []; // [{icon, lbl, zone}] — hidden initially
-      let _demonMode = false;
-
-      const _makeDiffSlot = (frame, label, slotIdx, totalSlots, padX, slotW, iconH, iconY, labelY, depth, onClick, angle=0) => {
-        const dx = panelLeft + padX + slotIdx * slotW + slotW / 2;
-        const icon = this.add.image(dx, iconY, "GJ_GameSheet03", frame)
-          .setScrollFactor(0).setDepth(depth).setOrigin(0.5, 0.5).setTint(0x888888);
-        if (angle) { icon.setAngle(angle); }
-        icon.setScale(0.88);
-        const _iconBase = 0.88;
-        const lbl = this.add.bitmapText(dx, labelY, "bigFont", label, 20)
-          .setScrollFactor(0).setDepth(depth).setOrigin(0.5, 0.5).setTint(0x888888);
-        const zoneH = labelY - iconY + iconH * 0.5;
-        const zoneY = iconY + zoneH / 2 - iconH * 0.25;
-        const zone = this.add.zone(dx, zoneY, slotW * 0.88, zoneH)
-          .setScrollFactor(0).setDepth(depth + 1).setInteractive();
-        zone.on("pointerdown", () => {
-          zone._dn = true;
-          this.tweens.killTweensOf([icon, lbl]);
-          this.tweens.add({ targets: [icon, lbl], scale: _iconBase * 1.15, duration: 80, ease: "Quad.Out" });
-        });
-        zone.on("pointerup", () => {
-          if (!zone._dn) return; zone._dn = false;
-          this.tweens.killTweensOf([icon, lbl]);
-          this.tweens.add({ targets: [icon, lbl], scale: _iconBase, duration: 400, ease: "Bounce.Out" });
-          onClick(icon, lbl);
-        });
-        zone.on("pointerout", () => {
-          if (!zone._dn) return; zone._dn = false;
-          this.tweens.killTweensOf([icon, lbl]);
-          this.tweens.add({ targets: [icon, lbl], scale: _iconBase, duration: 200, ease: "Back.Out" });
-        });
-        return { icon, lbl, zone };
-      };
-
-      // Build normal difficulty row
-      _diffDefs.forEach((def, i) => {
-        const slot = _makeDiffSlot(
-          def.frame, def.label, i, _diffCount,
-          _diffPadX, _diffSlotW, _diffIconH, _diffIconY, _diffLabelY, 106,
-          (icon, lbl) => {
-            if (def.isDemon) {
-              // Switch to demon sub-type row
-              _demonMode = true;
-              _normalDiffGroups.forEach(g => { g.icon.setVisible(false); g.lbl.setVisible(false); g.zone.setActive(false).setVisible(false); });
-              _demonDiffGroups.forEach(g => { g.icon.setVisible(true);  g.lbl.setVisible(true);  g.zone.setActive(true).setVisible(true); });
-              // Show list button in demon sub-row
-              if (this._searchListBtn) { const lb = this._searchListBtn; lb.icon.setVisible(true); lb.lbl.setVisible(true); lb.zone.setActive(true).setVisible(true); }
-            } else {
-              const on = icon._active = !icon._active;
-              icon.setTint(on ? 0xffffff : 0x888888);
-              lbl.setTint(on  ? 0xffffff : 0x888888);
-            }
-          }
-        );
-        _normalDiffGroups.push(slot);
-        _diffObjects.push(slot.icon, slot.lbl, slot.zone);
-      });
-
-      // ── "List" button — sits on top of the Demon slot (index 6), visible always ──
-      // Clicking opens the Demon List website. Uses accountBtn_myLists icon.
-      {
-        const _demonSlotIdx = 6;
-        const _listX  = panelLeft + _diffPadX + _demonSlotIdx * _diffSlotW + _diffSlotW / 2;
-        const _listIcon = this.add.image(_listX, _diffIconY, "GJ_GameSheet03", "rankIcon_1_001.png")
-          .setScrollFactor(0).setDepth(108).setOrigin(0.5, 0.5).setScale(0.88).setVisible(false);
-        const _listLbl  = this.add.bitmapText(_listX, _diffLabelY, "bigFont", "List", 20)
-          .setScrollFactor(0).setDepth(108).setOrigin(0.5, 0.5).setTint(0x888888).setVisible(false);
-        const _listZone = this.add.zone(_listX, _diffIconY, _diffSlotW * 0.88, filtersPanelH * 0.85)
-          .setScrollFactor(0).setDepth(109).setInteractive().setVisible(false).setActive(false);
-        const _listBase = 0.88;
-        _listZone.on("pointerdown", () => {
-          _listZone._dn = true;
-          this.tweens.killTweensOf([_listIcon, _listLbl]);
-          this.tweens.add({ targets: [_listIcon, _listLbl], scale: _listBase * 1.15, duration: 80, ease: "Quad.Out" });
-        });
-        _listZone.on("pointerup", () => {
-          if (!_listZone._dn) return; _listZone._dn = false;
-          this.tweens.killTweensOf([_listIcon, _listLbl]);
-          this.tweens.add({ targets: [_listIcon, _listLbl], scale: _listBase, duration: 400, ease: "Bounce.Out" });
-          window.open("https://www.webdemonlist.org", "_blank");
-        });
-        _listZone.on("pointerout", () => {
-          if (!_listZone._dn) return; _listZone._dn = false;
-          this.tweens.killTweensOf([_listIcon, _listLbl]);
-          this.tweens.add({ targets: [_listIcon, _listLbl], scale: _listBase, duration: 200, ease: "Back.Out" });
-        });
-        // Show list button in demon sub-mode, hide in normal mode
-        // Patch the demon slot click to also toggle list button
-        const _demonSlotGroup = _normalDiffGroups[_demonSlotIdx];
-        const _origDemonZoneUp = _demonSlotGroup.zone.listenerCount("pointerup") > 0;
-        _demonSlotGroup.zone.on("pointerup_list_patch", () => {
-          _listIcon.setVisible(true); _listLbl.setVisible(true);
-          _listZone.setActive(true).setVisible(true);
-        });
-        // Override: when demon row is shown, also show list btn; when back, hide it
-        // We hook into the existing visibility toggles via the _demonDiffGroups show logic
-        _diffObjects.push(_listIcon, _listLbl, _listZone);
-
-        // Store refs so demon/back toggles can show/hide the list button
-        this._searchListBtn = { icon: _listIcon, lbl: _listLbl, zone: _listZone };
-      }
-
-      // Build demon sub-type row (hidden by default, uses same panel space)
-      // 5 demons + 1 "back" slot = 6 slots across the panel
-      const _demonSlots = 6;
-      const _demonSlotW = (panelW - _diffPadX * 2) / _demonSlots;
-      // difficulty_XX_btn sprites are tall (86-95px native) and include baked-in text.
-      // Use a larger iconH and vertically centre them in the panel.
-      const _demonIconH  = filtersPanelH * 0.78;
-      const _demonIconY  = filtersPanelY + filtersPanelH * 0.50;
-      const _demonLabelY = filtersPanelY + filtersPanelH * 0.92; // label off-screen (empty)
-      // Back button (left slot) — use the pink backArrowPlain arrow, not a demon face
-      const _backSlot = _makeDiffSlot(
-        "backArrowPlain_01_001.png", "Back", 0, _demonSlots,
-        _diffPadX, _demonSlotW, _demonIconH, _demonIconY, _demonLabelY, 106,
-        (icon, lbl) => {
-          // Return to normal row
-          _demonMode = false;
-          _demonDiffGroups.forEach(g => { g.icon.setVisible(false); g.lbl.setVisible(false); g.zone.setActive(false).setVisible(false); });
-          _normalDiffGroups.forEach(g => { g.icon.setVisible(true);  g.lbl.setVisible(true);  g.zone.setActive(true).setVisible(true); });
-          // Hide list button
-          if (this._searchListBtn) { const lb = this._searchListBtn; lb.icon.setVisible(false); lb.lbl.setVisible(false); lb.zone.setActive(false).setVisible(false); }
-        }
-      );
-      _backSlot.icon.setVisible(false); _backSlot.lbl.setVisible(false);
-      _backSlot.zone.setActive(false).setVisible(false);
-      _demonDiffGroups.push(_backSlot);
-      _diffObjects.push(_backSlot.icon, _backSlot.lbl, _backSlot.zone);
-
-      // 5 demon sub-type slots (slots 1-5)
-      _demonDefs.forEach((def, i) => {
-        const slot = _makeDiffSlot(
-          def.frame, def.label, i + 1, _demonSlots,
-          _diffPadX, _demonSlotW, _demonIconH, _demonIconY, _demonLabelY, 106,
-          (icon, lbl) => {
-            const on = icon._active = !icon._active;
-            icon.setTint(on ? 0xffffff : 0x888888);
-            lbl.setTint(on  ? 0xffffff : 0x888888);
-          },
-          def.needsAngle ? -90 : 0
-        );
-        slot.icon.setVisible(false); slot.lbl.setVisible(false);
-        slot.zone.setActive(false).setVisible(false);
-        _demonDiffGroups.push(slot);
-        _diffObjects.push(slot.icon, slot.lbl, slot.zone);
-      });
-
-      // ── Length panel ──────────────────────────────────────────────────────────
-      const extraPanelY = filtersPanelY + filtersPanelH + 18;
-      const extraPanelH = sh * 0.09;
+      const extraPanelY  = filtersPanelY + filtersPanelH + 18;
+      const extraPanelH  = sh * 0.11;
       gfx.fillStyle(extraPanelColor, panelAlpha);
       gfx.fillRoundedRect(panelLeft, extraPanelY, panelW, extraPanelH, panelRadius);
 
-      // ── Length buttons ────────────────────────────────────────────────────────
-      // 6 labels + star, evenly slotted. Dimmed until toggled.
-      const _lenDefs  = ["Tiny","Short","Medium","Long","XL","Plat"];
-      const _lenTotal = _lenDefs.length + 0.8;  // +0.8 gives star a slightly smaller slot
-      const _lenPadX  = panelW * 0.03;
-      const _lenSlotW = (panelW - _lenPadX * 2) / _lenTotal;
-      const _lenY     = extraPanelY + extraPanelH / 2;
-      const _lenObjects = [];
+      // Quick Search 3x3 grid — sort types are well-documented boomlings API values;
+      // Sent/Followed/Friends need a real logged-in GD account (accountID + friend
+      // graph), which this client doesn't have, so they're shown but disabled.
+      const qsDefs = [
+        { label: "Downloads", frame: "GJ_sDownloadIcon_001.png", rotated: false, type: 1  },
+        { label: "Likes",     frame: "GJ_sLikeIcon_001.png",     rotated: true,  type: 2  },
+        // No confirmed boomlings API type for the mod-rating "Sent" queue — even
+        // GDBrowser's own search wrapper has no mapping for it (type 17 is actually
+        // "gdworld", a different thing entirely). Disabled until a real value turns up.
+        { label: "Sent",      frame: "GJ_sModIcon_001.png",      rotated: false, type: null, disabledReason: "Sent is coming soon" },
+        { label: "Trending",  frame: "GJ_sTrendingIcon_001.png", rotated: false, type: 3  },
+        { label: "Recent",    frame: "GJ_sRecentIcon_001.png",   rotated: true,  type: 4  },
+        { label: "Magic",     frame: "GJ_sMagicIcon_001.png",    rotated: true,  type: 7  },
+        { label: "Awarded",   frame: "GJ_starsIcon_001.png",     rotated: false, type: 11, iconScale: 0.68 },
+        { label: "Followed",  frame: "GJ_sFollowedIcon_001.png", rotated: true,  type: null },
+        { label: "Friends",   frame: "GJ_sFriendsIcon_001.png",  rotated: false, type: null },
+      ];
+      const qsCols = 3;
+      const qsCellW = panelW / qsCols;
+      const qsCellH = qsPanelH / 3;
+      const qsObjs = [];
+      qsDefs.forEach((def, i) => {
+        const col = i % qsCols, row = Math.floor(i / qsCols);
+        const cx = panelLeft + col * qsCellW + qsCellW / 2;
+        const cy = qsPanelY + row * qsCellH + qsCellH / 2;
+        const btnW = qsCellW - 24;
+        const btnH = Math.min(56, qsCellH - 16);
+        const enabled = def.type !== null;
+        const btnBg = this.add.nineslice(cx, cy, "GJ_button01", null, btnW, btnH, 24, 24, 24, 24)
+          .setScrollFactor(0).setDepth(105).setInteractive();
+        const label = this.add.bitmapText(cx - 16, cy, "bigFont", def.label.toUpperCase(), 20)
+          .setScrollFactor(0).setDepth(106).setOrigin(0.5, 0.5).setScale(1.2);
+        const icon = this.add.image(cx + btnW / 2 - 30, cy, "GJ_GameSheet03", def.frame)
+          .setScrollFactor(0).setDepth(106).setScale((def.iconScale || 1) * 1.05);
+        if (def.rotated) icon.setFlipY(true).setAngle(90);
+        if (!enabled) {
+          btnBg.setTint(0x777777).setAlpha(0.55);
+          label.setTint(0xbbbbbb);
+          icon.setAlpha(0.55);
+        }
+        qsObjs.push(btnBg, label, icon);
+        this._makeBouncyButton(btnBg, 1, () => {
+          if (!enabled) { _showStatus(def.disabledReason || (def.label + " requires a linked GD account"), "#ff6666"); return; }
+          _runQuickSearch(def.type, def.label);
+        });
+      });
 
-      _lenDefs.forEach((name, i) => {
-        const lx   = panelLeft + _lenPadX + i * _lenSlotW + _lenSlotW / 2;
-        const lbl  = this.add.bitmapText(lx, _lenY, "bigFont", name, 28)
-          .setScrollFactor(0).setDepth(106).setOrigin(0.5, 0.5).setTint(0x888888);
-        const zone = this.add.zone(lx, _lenY, _lenSlotW * 0.88, extraPanelH * 0.85)
-          .setScrollFactor(0).setDepth(107).setInteractive();
-        zone.on("pointerdown", () => {
-          zone._dn = true;
-          this.tweens.killTweensOf(lbl);
-          this.tweens.add({ targets: lbl, scale: 1.15, duration: 80, ease: "Quad.Out" });
-        });
-        zone.on("pointerup", () => {
-          if (!zone._dn) return; zone._dn = false;
-          this.tweens.killTweensOf(lbl);
-          this.tweens.add({ targets: lbl, scale: 1, duration: 400, ease: "Bounce.Out" });
-          lbl.setTint((lbl._active = !lbl._active) ? 0xffffff : 0x888888);
-        });
-        zone.on("pointerout", () => {
-          if (!zone._dn) return; zone._dn = false;
-          this.tweens.killTweensOf(lbl);
-          this.tweens.add({ targets: lbl, scale: 1, duration: 200, ease: "Back.Out" });
-        });
-        _lenObjects.push(lbl, zone);
+      // Difficulty filter row
+      const diffDefs = [
+        { label: "N/A",    frame: "difficulty_00_btn_001.png",    rotated: false, diff: -1 },
+        { label: "Easy",   frame: "difficulty_01_btn_001.png",    rotated: true,  diff: 1  },
+        { label: "Normal", frame: "difficulty_02_btn_001.png",    rotated: false, diff: 2  },
+        { label: "Hard",   frame: "difficulty_03_btn_001.png",    rotated: true,  diff: 3  },
+        { label: "Harder", frame: "difficulty_04_btn_001.png",    rotated: false, diff: 4  },
+        { label: "Insane", frame: "difficulty_05_btn_001.png",    rotated: true,  diff: 5  },
+        { label: "Easy Demon", frame: "difficulty_06_btn_001.png", rotated: true, diff: -2, demonFilter: 1 },
+        { label: "Auto",   frame: "difficulty_auto_btn_001.png",  rotated: true,  diff: -3 },
+      ];
+      const diffCellW = panelW / diffDefs.length;
+      const diffIconY = filtersPanelY + filtersPanelH * 0.5;
+      const diffButtons = [];
+      const diffObjs = [];
+      const DIFF_DIM_TINT = 0x999999;
+      const DIFF_TARGET_SIZE = 68;
+      diffDefs.forEach((def) => {
+        const idx = diffButtons.length;
+        const cx = panelLeft + idx * diffCellW + diffCellW / 2;
+        // The difficulty_XX_btn frames already have their name baked into the art —
+        // no separate caption needed (that's what was causing the doubled text).
+        const icon = this.add.image(cx, diffIconY, "GJ_GameSheet03", def.frame)
+          .setScrollFactor(0).setDepth(106).setTint(DIFF_DIM_TINT).setInteractive();
+        // Scale to a consistent bounding box instead of one flat factor — the frames
+        // have different native pixel sizes, so a flat scale made some look wider/
+        // bigger than others.
+        icon.setScale(DIFF_TARGET_SIZE / Math.max(icon.width, icon.height));
+        if (def.rotated) icon.setFlipY(true).setAngle(90);
+        diffButtons.push({ def, icon });
+        diffObjs.push(icon);
       });
+      const _refreshDiffVisuals = () => {
+        diffButtons.forEach(({ def, icon }) => {
+          const isSelected = def.diff < 0
+            ? (_activeDiff.length === 1 && _activeDiff[0] === def.diff &&
+               (def.diff !== -2 || _activeDemonFilter === def.demonFilter))
+            : _activeDiff.includes(def.diff);
+          if (isSelected) icon.clearTint(); else icon.setTint(DIFF_DIM_TINT);
+        });
+      };
+      diffButtons.forEach(({ def, icon }) => {
+        this._makeBouncyButton(icon, icon.scale, () => {
+          if (def.diff < 0) {
+            const alreadyExclusive = _activeDiff.length === 1 && _activeDiff[0] === def.diff &&
+              (def.diff !== -2 || _activeDemonFilter === def.demonFilter);
+            if (alreadyExclusive) { _activeDiff = []; _activeDemonFilter = null; }
+            else { _activeDiff = [def.diff]; _activeDemonFilter = def.demonFilter || null; }
+          } else {
+            _activeDemonFilter = null;
+            _activeDiff = _activeDiff.filter(d => d >= 0);
+            _activeDiff = _activeDiff.includes(def.diff)
+              ? _activeDiff.filter(d => d !== def.diff)
+              : [..._activeDiff, def.diff];
+          }
+          _refreshDiffVisuals();
+        });
+      });
+      _refreshDiffVisuals();
 
-      // Star after "Plat" — uses star_small01 (25x25), fixed base scale
-      const _starX    = panelLeft + _lenPadX + _lenDefs.length * _lenSlotW + _lenSlotW * 0.35;
-      const _starH    = extraPanelH * 0.68;
-      const _star     = this.add.image(_starX, _lenY, "GJ_GameSheet03", "star_small01_001.png")
-        .setScrollFactor(0).setDepth(106).setOrigin(0.5, 0.5).setTint(0x888888);
-      const _starBase = _starH / _star.displayHeight;
-      _star.setScale(_starBase);
-      const _starZone = this.add.zone(_starX, _lenY, _lenSlotW * 0.7, extraPanelH * 0.85)
-        .setScrollFactor(0).setDepth(107).setInteractive();
-      _starZone.on("pointerdown", () => {
-        _starZone._dn = true;
-        this.tweens.killTweensOf(_star);
-        this.tweens.add({ targets: _star, scale: _starBase * 1.15, duration: 80, ease: "Quad.Out" });
+      // Length + star filter row
+      const lenDefs = [
+        { label: "Tiny", len: 0 }, { label: "Short", len: 1 }, { label: "Medium", len: 2 },
+        { label: "Long", len: 3 }, { label: "XL", len: 4 }, { label: "Plat.", len: 5 },
+      ];
+      const lenCols = lenDefs.length + 2;
+      const lenCellW = panelW / lenCols;
+      const lenY = extraPanelY + extraPanelH / 2;
+      const lenButtons = [];
+      const lenObjs = [];
+      const clockCX = panelLeft + lenCellW / 2;
+      const clockIcon = this.add.image(clockCX, lenY, "GJ_GameSheet03", "GJ_timeIcon_001.png")
+        .setScrollFactor(0).setDepth(106).setScale(0.95);
+      lenObjs.push(clockIcon);
+      lenDefs.forEach((def, i) => {
+        const cx = panelLeft + (i + 1) * lenCellW + lenCellW / 2;
+        const label = this.add.bitmapText(cx - 10, lenY, "bigFont", def.label, 24)
+          .setScrollFactor(0).setDepth(106).setOrigin(0.5, 0.5).setTint(DIFF_DIM_TINT).setInteractive();
+        lenButtons.push({ def, label });
+        lenObjs.push(label);
       });
-      _starZone.on("pointerup", () => {
-        if (!_starZone._dn) return; _starZone._dn = false;
-        this.tweens.killTweensOf(_star);
-        this.tweens.add({ targets: _star, scale: _starBase, duration: 400, ease: "Bounce.Out" });
-        _star.setTint((_star._active = !_star._active) ? 0xffdd00 : 0x888888);
+      const starCX = panelLeft + (lenDefs.length + 1) * lenCellW + lenCellW / 2;
+      const starIcon = this.add.image(starCX, lenY, "GJ_GameSheet03", "GJ_starsIcon_001.png")
+        .setScrollFactor(0).setDepth(106).setScale(0.95).setTint(DIFF_DIM_TINT).setInteractive();
+      lenObjs.push(starIcon);
+      const _refreshLenVisuals = () => {
+        lenButtons.forEach(({ def, label }) => {
+          label.setTint(_activeLen.includes(def.len) ? 0xffffff : DIFF_DIM_TINT);
+        });
+        if (_activeStar) starIcon.clearTint(); else starIcon.setTint(DIFF_DIM_TINT);
+      };
+      lenButtons.forEach(({ def, label }) => {
+        this._makeBouncyButton(label, 1, () => {
+          _activeLen = _activeLen.includes(def.len)
+            ? _activeLen.filter(l => l !== def.len)
+            : [..._activeLen, def.len];
+          _refreshLenVisuals();
+        });
       });
-      _starZone.on("pointerout", () => {
-        if (!_starZone._dn) return; _starZone._dn = false;
-        this.tweens.killTweensOf(_star);
-        this.tweens.add({ targets: _star, scale: _starBase, duration: 200, ease: "Back.Out" });
+      this._makeBouncyButton(starIcon, 0.95, () => { _activeStar = !_activeStar; _refreshLenVisuals(); });
+      _refreshLenVisuals();
+
+      // Right-edge icon stack: clear filters / advanced options
+      const rightIconX = sw - 55;
+      const clearBtn = this.add.image(rightIconX, topPanelY + topPanelH / 2, "GJ_GameSheet03", "GJ_closeBtn_001.png")
+        .setScrollFactor(0).setDepth(105).setScale(0.8).setInteractive().setFlipY(true).setAngle(90);
+      this._makeBouncyButton(clearBtn, 0.8, () => {
+        inputText = "";
+        _updateInputDisplay();
+        _activeDiff = [];
+        _activeDemonFilter = null;
+        _activeLen = [];
+        _activeStar = false;
+        _refreshDiffVisuals();
+        _refreshLenVisuals();
+        _hideStatus();
       });
-      _lenObjects.push(_star, _starZone);
+      const advBtn = this.add.image(rightIconX, topPanelY + topPanelH / 2 + 100, "GJ_GameSheet03", "GJ_plusBtn_001.png")
+        .setScrollFactor(0).setDepth(105).setScale(0.8).setInteractive().setFlipY(true).setAngle(90);
+      this._makeBouncyButton(advBtn, 0.8, () => { _showStatus("Advanced filters coming soon"); });
 
       this._searchOverlayObjects.push(gfx, qsLabel, filtersLabel, cornerBR, cornerBL,
         placeholderLabel, typedLabel, inputCursor, inputHitZone, innerBtn1, innerBtn2, innerBtn3,
-        ..._qsSearchObjects, ..._diffObjects, ..._lenObjects);
+        clearBtn, advBtn, ...qsObjs, ...diffObjs, ...lenObjs);
 
       let _loading = false;
+      let _statusLabel = null;
+      let _statusTimer = null;
+      const _showStatus = (msg, color = "#ffffff") => {
+        const tint = typeof color === "string" ? parseInt(color.replace("#", "0x")) : color;
+        if (!_statusLabel) {
+          _statusLabel = this.add.bitmapText(sw / 2, topPanelY + topPanelH + 16, "bigFont", "", 22)
+            .setScrollFactor(0).setDepth(170).setOrigin(0.5, 0.5);
+          this._searchOverlayObjects.push(_statusLabel);
+        }
+        if (_statusTimer) { _statusTimer.remove(); _statusTimer = null; }
+        _statusLabel.setText(msg).setTint(tint).setVisible(true);
+        _statusTimer = this.time.delayedCall(2500, () => { if (_statusLabel) _statusLabel.setVisible(false); });
+      };
+      const _hideStatus = () => {
+        if (_statusTimer) { _statusTimer.remove(); _statusTimer = null; }
+        if (_statusLabel) _statusLabel.setVisible(false);
+      };
+
+      const _currentFilterOpts = () => ({
+        diff: _activeDiff, demonFilter: _activeDemonFilter, len: _activeLen, star: _activeStar
+      });
+
       const _doSearch = async () => {
         if (_loading) return;
-        const levelId = htmlInput.value.trim().replace(/\D/g, "");
-        if (!levelId) return;
+        const raw = htmlInput.value.trim();
+        if (!raw) return;
         _loading = true;
         try {
-          await _doSearchInner(levelId);
+          if (/^\d+$/.test(raw)) {
+            await _doSearchInner(raw);
+          } else {
+            await _doNameSearch(raw, 0, _currentFilterOpts());
+          }
         } catch (err) {
         } finally {
           _loading = false;
         }
       };
+
+      const _runQuickSearch = async (type, title) => {
+        if (_loading) return;
+        _loading = true;
+        try {
+          await _doNameSearch(htmlInput.value.trim(), 0, { type, title, ..._currentFilterOpts() });
+        } catch (err) {
+        } finally {
+          _loading = false;
+        }
+      };
+
+      const _buildSearchBody = (query, page, opts) => {
+        const parts = [`type=${opts.type ?? 0}`, `page=${page}`, `secret=Wmfd2893gb7`];
+        if (query) parts.push(`str=${encodeURIComponent(query)}`);
+        if (opts.diff && opts.diff.length) parts.push(`diff=${opts.diff.join(",")}`);
+        if (opts.demonFilter) parts.push(`demonFilter=${opts.demonFilter}`);
+        if (opts.len && opts.len.length) parts.push(`len=${opts.len.join(",")}`);
+        if (opts.star) parts.push(`star=1`);
+        return parts.join("&");
+      };
+
+      const _doNameSearch = async (query, page, opts = {}) => {
+        const PROXY_BASE = (window._gdProxyUrl || "").replace(/\/$/, "");
+        if (!PROXY_BASE) return;
+        _showStatus("Searching...");
+        let raw;
+        try {
+          const res = await fetch(`${PROXY_BASE}/getGJLevels21.php`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: _buildSearchBody(query, page, opts)
+          });
+          if (!res.ok) throw new Error(`Proxy returned ${res.status}`);
+          raw = await res.text();
+        } catch (err) {
+          _showStatus("Search failed", "#ff6666");
+          return;
+        }
+        if (!raw || raw === "-1" || !raw.includes(":")) {
+          _showStatus("No levels found", "#ff6666");
+          return;
+        }
+
+        const segments = raw.split("#");
+        const authors = {};
+        (segments[1] || "").split("|").forEach(c => {
+          const p = c.split(":");
+          if (p.length >= 2) authors[p[0]] = p[1];
+        });
+        const songs = {};
+        (segments[2] || "").split("~:~").forEach(s => {
+          const parts = s.split("~|~");
+          const m = {};
+          for (let i = 0; i + 1 < parts.length; i += 2) m[parts[i].trim()] = parts[i + 1];
+          if (m["1"]) songs[m["1"].trim()] = (m["2"] || "").trim();
+        });
+
+        const levels = (segments[0] || "").split("|").filter(Boolean).map(str => {
+          const parts = str.split(":");
+          const m = {};
+          for (let i = 0; i + 1 < parts.length; i += 2) m[parts[i]] = parts[i + 1];
+          const customSongID = (m["35"] || "").trim();
+          return {
+            id:        m["1"] || "",
+            name:      (m["2"] || "Unnamed").trim(),
+            author:    authors[m["6"]] || "-",
+            diffNum:   parseInt(m["9"]) || 0,
+            downloads: parseInt(m["10"]) || 0,
+            likes:     parseInt(m["14"]) || 0,
+            length:    parseInt(m["15"]) || 0,
+            demon:     m["17"] == "1",
+            stars:     parseInt(m["18"]) || 0,
+            featured:  (parseInt(m["19"]) || 0) > 0,
+            auto:      m["25"] == "1",
+            epic:      (parseInt(m["42"]) || 0) > 0,
+            demonDiff: parseInt(m["43"]) || 0,
+            song:      customSongID && customSongID !== "0" ? (songs[customSongID] || "") : ""
+          };
+        }).filter(l => l.id);
+
+        if (!levels.length) {
+          _showStatus("No levels found", "#ff6666");
+          return;
+        }
+        if ((opts.type ?? 0) === 0) levels.sort((a, b) => b.likes - a.likes);
+        _hideStatus();
+        _showSearchResults(opts.title || query, page, levels, { query, opts });
+      };
+
+      let _resultsObjects = [];
+      let _resultsOpen = false;
+      let _resultsWheel = null;
+      const _closeResults = () => {
+        if (!_resultsOpen) return;
+        _resultsOpen = false;
+        this._searchResultsOpen = false;
+        if (_resultsWheel) { this.input.off('wheel', _resultsWheel); _resultsWheel = null; }
+        for (const obj of _resultsObjects) { if (obj && obj.destroy) obj.destroy(); }
+        _resultsObjects = [];
+      };
+      const _diffFaceFrame = (lvl) => {
+        if (lvl.auto) return "diffIcon_auto_btn_001.png";
+        if (lvl.demon) return ({ 3: "diffIcon_07_btn_001.png", 4: "diffIcon_08_btn_001.png", 5: "diffIcon_09_btn_001.png", 6: "diffIcon_10_btn_001.png" })[lvl.demonDiff] || "diffIcon_06_btn_001.png";
+        return ({ 10: "diffIcon_01_btn_001.png", 20: "diffIcon_02_btn_001.png", 30: "diffIcon_03_btn_001.png", 40: "diffIcon_04_btn_001.png", 50: "diffIcon_05_btn_001.png" })[lvl.diffNum] || "diffIcon_00_btn_001.png";
+      };
+      const _fmtCount = (n) => n >= 1000000 ? (n / 1000000).toFixed(1) + "M" : n >= 10000 ? (n / 1000).toFixed(1) + "K" : String(n);
+      const _showSearchResults = (title, page, levels, searchCtx = { query: title, opts: {} }) => {
+        _closeResults();
+        _blurInput();
+        _resultsOpen = true;
+        // Own UHD group, distinct from the search menu underneath: overlays render
+        // above the canvas, so sharing 'search' would leave the menu's UHD buttons
+        // floating over this list (and these icons over the menu after closing).
+        // update() nulls _uhdContext each frame and this runs from an async fetch
+        // callback, so it must be (re-)tagged here.
+        this._uhdContext = 'searchResults';
+        this._searchResultsOpen = true;
+        const centerX = sw / 2;
+
+        const bg = this.add.graphics().setScrollFactor(0).setDepth(160);
+        const gradSteps = 80;
+        for (let gi = 0; gi < gradSteps; gi++) {
+          const t = gi / (gradSteps - 1);
+          const r1 = Math.round(0x01 * t);
+          const g1 = Math.round(0x65 + (0x2c - 0x65) * t);
+          const b1 = Math.round(0xff + (0x71 - 0xff) * t);
+          bg.fillStyle((r1 << 16) | (g1 << 8) | b1, 1);
+          bg.fillRect(0, Math.floor(gi * sh / gradSteps), sw, Math.ceil(sh / gradSteps) + 1);
+        }
+        const blocker2 = this.add.zone(centerX, sh / 2, sw, sh).setScrollFactor(0).setDepth(161).setInteractive();
+        const container = this.add.container(0, 0).setScrollFactor(0).setDepth(162);
+        _resultsObjects.push(bg, blocker2, container);
+
+        const tableW = 712;
+        const tableH = 460;
+        const tableX = (sw - tableW) / 2;
+        const tableY = 85;
+        const lengthNames = ["Tiny", "Short", "Medium", "Long", "XL", "Plat."];
+
+        const listContainer = this.add.container(0, 0);
+        const maskShape = this.add.graphics().fillStyle(0xffffff).fillRect(tableX, tableY, tableW, tableH).setVisible(false);
+        listContainer.setMask(maskShape.createGeometryMask());
+        _resultsObjects.push(maskShape);
+        container.add(this.add.graphics().fillStyle(0xc2723e, 1).fillRect(tableX, tableY, tableW, tableH));
+        container.add(listContainer);
+
+        const spacing = 100;
+        const rowUhdImgs = [];
+        levels.forEach((lvl, rowIndex) => {
+          const slotY = (rowIndex * spacing) + (spacing / 2);
+          const stripeColor = rowIndex % 2 !== 0 ? 0xc2723e : 0xa1582c;
+
+          const bgStripe = this.add.rectangle(centerX, slotY, tableW - 10, spacing, stripeColor, 1);
+          const separator = this.add.rectangle(centerX, slotY + (spacing / 2), tableW - 10, 1, 0x502c16, 1);
+          const diffFrame = _diffFaceFrame(lvl);
+          const diffFace = this.add.image(tableX + 50, slotY - (lvl.stars > 0 ? 12 : 0), "GJ_GameSheet03", diffFrame).setScale(0.85);
+          // frames stored rotated in the atlas need the same compensation as GJ_playBtn2 elsewhere
+          if (diffFrame === "diffIcon_06_btn_001.png" || diffFrame === "diffIcon_09_btn_001.png") diffFace.setFlipY(true).setAngle(90);
+          listContainer.add([bgStripe, separator, diffFace]);
+          rowUhdImgs.push(diffFace);
+          if (lvl.stars > 0) {
+            const starTxt = this.add.bitmapText(tableX + 44, slotY + 30, "bigFont", String(lvl.stars), 20).setOrigin(1, 0.5);
+            const starIcon = this.add.image(tableX + 55, slotY + 30, "GJ_GameSheet03", "GJ_starsIcon_001.png").setScale(0.6);
+            listContainer.add([starTxt, starIcon]);
+            rowUhdImgs.push(starIcon);
+          }
+
+          const nameTxt = this.add.bitmapText(tableX + 105, slotY - 26, "bigFont", lvl.name, 30).setOrigin(0, 0.5);
+          const authorTxt = this.add.bitmapText(tableX + 105, slotY + 2, "goldFont", "By " + lvl.author, 20).setOrigin(0, 0.5);
+          const statsY = slotY + 30;
+          const dlIcon = this.add.image(tableX + 115, statsY, "GJ_GameSheet03", "GJ_downloadsIcon_001.png").setScale(0.55);
+          const dlTxt = this.add.bitmapText(dlIcon.x + 16, statsY, "bigFont", _fmtCount(lvl.downloads), 18).setOrigin(0, 0.5);
+          const likeIcon = this.add.image(tableX + 235, statsY, "GJ_GameSheet03", "GJ_likesIcon_001.png").setScale(0.55);
+          const likeTxt = this.add.bitmapText(likeIcon.x + 16, statsY, "bigFont", _fmtCount(lvl.likes), 18).setOrigin(0, 0.5);
+          const lenIcon = this.add.image(tableX + 355, statsY, "GJ_GameSheet03", "GJ_timeIcon_001.png").setScale(0.55);
+          const lenTxt = this.add.bitmapText(lenIcon.x + 16, statsY, "bigFont", lengthNames[lvl.length] || "?", 18).setOrigin(0, 0.5);
+          listContainer.add([nameTxt, authorTxt, dlIcon, dlTxt, likeIcon, likeTxt, lenIcon, lenTxt]);
+          rowUhdImgs.push(dlIcon, likeIcon, lenIcon);
+
+          const viewBtn = this.add.nineslice(tableX + tableW - 80, slotY, "GJ_button01", null, 120, 60, 24, 24, 24, 24).setScale(0.75).setInteractive();
+          const viewTxt = this.add.bitmapText(viewBtn.x - 2, viewBtn.y - 1, "bigFont", "View", 28).setOrigin(0.5).setScale(0.8);
+          listContainer.add([viewBtn, viewTxt]);
+          this._makeBouncyButton(viewBtn, 0.75, async () => {
+            if (_loading) return;
+            _loading = true;
+            const loadTxt = this.add.bitmapText(centerX, sh / 2, "bigFont", "Loading level...", 30)
+              .setScrollFactor(0).setDepth(170).setOrigin(0.5);
+            _resultsObjects.push(loadTxt);
+            try {
+              await _doSearchInner(lvl.id);
+            } catch (err) {
+              _showStatus("Level failed to load", "#ff6666");
+            } finally {
+              _loading = false;
+              loadTxt.destroy();
+            }
+          });
+        });
+
+        const sideFrame = this.textures.getFrame("GJ_GameSheet03", "GJ_table_side_001.png");
+        const sideScaleY = tableH / sideFrame.height;
+        container.add(this.add.image(tableX - 40, tableY, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, sideScaleY));
+        container.add(this.add.image(tableX + tableW + 40, tableY, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, sideScaleY));
+        container.add(this.add.image(centerX, tableY - 10, "GJ_GameSheet03", "GJ_table_top_001.png"));
+        container.add(this.add.image(centerX, tableY + tableH + 20, "GJ_GameSheet03", "GJ_table_bottom_001.png"));
+        container.add(this.add.bitmapText(centerX, tableY - 15, "bigFont", title.slice(0, 20), 42).setOrigin(0.5).setScale(1.1));
+        container.add(this.add.bitmapText(sw - 20, 20, "bigFont", "Page " + (page + 1), 22).setOrigin(1, 0.5));
+
+        let startY = tableY;
+        const listHeight = levels.length * spacing;
+        const minY = tableY - Math.max(0, listHeight - tableH) - 10;
+        const maxY = tableY + 22;
+        listContainer.y = maxY;
+        let scrollTargetY = maxY;
+        // The DOM UHD overlays aren't clipped by the table's geometry mask, so hide
+        // an icon's overlay while it straddles the table edge (the masked canvas
+        // sprite shows through instead) by re-grouping its entry out of 'search'.
+        const _syncRowOverlays = () => {
+          if (!this._uhdMap) return;
+          for (const img of rowUhdImgs) {
+            const e = this._uhdMap.get(img);
+            if (!e) continue;
+            const half = (img.displayHeight || img.height) / 2;
+            const wy = listContainer.y + img.y;
+            e.group = (wy - half >= tableY && wy + half <= tableY + tableH) ? 'searchResults' : '_maskedOut';
+          }
+        };
+        _syncRowOverlays();
+        _resultsWheel = (pointer, gameObjects, deltaX, deltaY) => {
+          if (!_resultsOpen) return;
+          scrollTargetY = Phaser.Math.Clamp(scrollTargetY - deltaY, minY, maxY);
+          this.tweens.add({ targets: listContainer, y: scrollTargetY, duration: 250, ease: 'Power2', overwrite: true, onUpdate: _syncRowOverlays });
+        };
+        this.input.on('wheel', _resultsWheel);
+        blocker2.on('pointerdown', (pointer) => { startY = pointer.y - listContainer.y; });
+        blocker2.on('pointermove', (pointer) => {
+          if (pointer.isDown) {
+            listContainer.y = Phaser.Math.Clamp(pointer.y - startY, minY, maxY);
+            scrollTargetY = listContainer.y;
+            _syncRowOverlays();
+          }
+        });
+
+        const resultsBack = this.add.image(50, 48, "GJ_GameSheet03", "GJ_arrow_03_001.png")
+          .setScrollFactor(0).setDepth(164).setFlipX(true).setFlipY(true).setRotation(Math.PI).setInteractive();
+        this._makeBouncyButton(resultsBack, 1, () => _closeResults());
+        _resultsObjects.push(resultsBack);
+
+        const goPage = async (p) => {
+          if (_loading) return;
+          _loading = true;
+          try { await _doNameSearch(searchCtx.query, p, searchCtx.opts); } catch (err) {} finally { _loading = false; }
+        };
+        if (page > 0) {
+          const prevArrow = this.add.image(45, sh / 2, "GJ_GameSheet03", "GJ_arrow_02_001.png")
+            .setScrollFactor(0).setDepth(164).setInteractive();
+          this._makeBouncyButton(prevArrow, 1, () => goPage(page - 1));
+          _resultsObjects.push(prevArrow);
+        }
+        if (levels.length >= 10) {
+          const nextArrow = this.add.image(sw - 45, sh / 2, "GJ_GameSheet03", "GJ_arrow_02_001.png")
+            .setScrollFactor(0).setDepth(164).setFlipX(true).setInteractive();
+          this._makeBouncyButton(nextArrow, 1, () => goPage(page + 1));
+          _resultsObjects.push(nextArrow);
+        }
+      };
+      this._searchOverlayObjects.push({ destroy: _closeResults });
+      this._closeSearchResults = _closeResults; // for the ESC handler's layer-by-layer back-out
       const _doSearchInner = async (levelId) => {
         const PROXY_BASE = (window._gdProxyUrl || "").replace(/\/$/, "");
         if (!PROXY_BASE) return;
@@ -1744,72 +2459,234 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         if (!rawResponse || rawResponse === "-1" || !rawResponse.includes(":")) {
           return;
         }
-        const gdMap = {};
-        const _gdMatches = [...rawResponse.matchAll(/(?:^|:)(\d+):/g)];
-        for (let i = 0; i < _gdMatches.length; i++) {
-          const valueStart = _gdMatches[i].index + _gdMatches[i][0].length;
-          const valueEnd   = i + 1 < _gdMatches.length ? _gdMatches[i + 1].index : rawResponse.length;
-          gdMap[_gdMatches[i][1]] = rawResponse.slice(valueStart, valueEnd);
+
+        const responseSegments = rawResponse.split("#");
+        const lvlParts = responseSegments[0].split(":");
+        const lvlMap = {};
+        for (let i = 0; i + 1 < lvlParts.length; i += 2) {
+          lvlMap[lvlParts[i]] = lvlParts[i + 1];
         }
-        const levelString   = gdMap["4"] || null;
-        const levelName     = gdMap["2"] || "Online Level";
-        const levelIdParsed = gdMap["1"] || levelId;
-        const songIdRaw     = (gdMap["35"] || "").trim();
-        const isCustomSong  = !!songIdRaw && songIdRaw !== "0";
-        const officialSongId = gdMap["12"] || "0";
-        const songKey = isCustomSong ? `ng_song_${songIdRaw}` : window.allLevels[officialSongId][0];
+        let _levelAuthor = "Unknown";
+        if (responseSegments[3]) {
+          const userParts = responseSegments[3].split(":");
+          if (userParts.length >= 2) _levelAuthor = userParts[1];
+        }
+
+        const levelData = {
+          author:         _levelAuthor,
+          // Core Level Info
+          id:             lvlMap["1"] || levelId,
+          title:          (lvlMap["2"] || "Online Level").trim(),
+          description:    lvlMap["3"] ? atob(lvlMap["3"].replace(/-/g, '+').replace(/_/g, '/')) : "", // Base64 decoded
+          string:         lvlMap["4"] || null, // The raw level data string
+          version:        parseInt(lvlMap["5"]) || 1,
+          
+          // User / Author Info
+          playerID:       lvlMap["6"] || null,
+          accountID:      lvlMap["57"] || null, // The author's accountID returned by the server
+
+          // Song Info
+          officialSong:   lvlMap["12"] || "0",
+          customSongID:   (lvlMap["35"] || "").trim(),
+          isCustomSong:   !!(lvlMap["35"] || "").trim() && (lvlMap["35"] || "").trim() !== "0",
+          isLibrarySong:  !!(lvlMap["35"] || "").trim() && (lvlMap["35"] || "").trim() !== "0" && parseInt((lvlMap["35"] || "").trim()) >= 1000000,
+          offset:         parseFloat(lvlMap["45"] || "0") || 0,
+
+          // Gameplay Details
+          difficulty:     parseInt(lvlMap["9"]) || 0, // Auto, Easy, Normal, Hard, Harder, Insane
+          stars:          parseInt(lvlMap["18"]) || 0,
+          diamonds:       parseInt(lvlMap["46"]) || 0,
+          orbs:           parseInt(lvlMap["48"]) || 0,
+          length:         parseInt(lvlMap["15"]) || 0, // 0=Tiny, 1=Small, 2=Medium, 3=Long, 4=XL, 5=Platformer
+          gameVersion:    parseInt(lvlMap["13"]) || 22, // The game version the level was created in (e.g. 22 = 2.2)
+          binaryVersion:  parseInt(lvlMap["52"]) || 0,  // The build version used to upload
+
+          // Meta / Social Counters
+          downloads:      parseInt(lvlMap["10"]) || 0,
+          likes:          parseInt(lvlMap["14"]) || 0,
+          objects:        parseInt(lvlMap["45"]) || 0, // Object count (Note: 45 can double as audio offset or object count depending on context)
+          ts:             lvlMap["28"] || null, // Upload/Update timestamp hint
+          
+          // Technical / Security Verification keys sent back by server
+          chk:            lvlMap["chk"] || null,
+          rs:             lvlMap["rs"] || null
+        };
+        console.groupCollapsed("level data");
+        const { string, ...tableFriendlyData } = levelData;
+        console.table(tableFriendlyData);
+        console.groupEnd();
+
+        const songKey = levelData.isCustomSong 
+          ? (levelData.isLibrarySong ? `lib_song_${levelData.customSongID}` : `ng_song_${levelData.customSongID}`) 
+          : window.allLevels[levelData.officialSong][0];
+          
         window.currentlevel[0] = songKey;
-        window._onlineSongOffset = parseFloat(gdMap["45"] || "0") || 0;
-        if (isCustomSong) {
-          window._onlineSongBuffer = null; 
+        window._onlineSongOffset = levelData.offset;
+        
+        const LOCAL_SONGS = {
+          "467339": { file: "Bloodbath.mp3", artist: "Dimrain47" }
+        };
+
+        if (levelData.isCustomSong && LOCAL_SONGS[levelData.customSongID]) {
+          const localSong = LOCAL_SONGS[levelData.customSongID];
+          const localKey = `local_song_${levelData.customSongID}`;
+          window.currentlevel[0] = localKey;
+          window._onlineSongBuffer = null;
+          window._onlineSongKey = null;
+          if (!this.cache.audio.exists(localKey)) {
+            await new Promise((resolve) => {
+              this.load.audio(localKey, "assets/music/" + localSong.file);
+              this.load.once("complete", resolve);
+              this.load.start();
+            });
+          }
+          window.currentlevel[3] = [window.currentlevel[3][0], localSong.artist];
+        } else if (levelData.isCustomSong) {
+          window._onlineSongBuffer = null;
           window._onlineSongKey    = null;
-          try {
             const ngRes = await fetch(`${PROXY_BASE}/getGJSongInfo.php`, {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: `songID=${songIdRaw}&secret=Wmfd2893gb7`
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: `songID=${levelData.customSongID}&secret=Wmfd2893gb7`
             });
             const ngText = ngRes.ok ? await ngRes.text() : "-1";
-            if (ngText && ngText !== "-1") { 
-              const ngParts = ngText.split("~|~");
-              const ngMap = {};
-              for (let i = 0; i + 1 < ngParts.length; i += 2) ngMap[ngParts[i]] = ngParts[i + 1];
-              const rawUrl  = (ngMap["10"] || "").trim();
-              const songUrl = decodeURIComponent(rawUrl);
-              const songArtist = (ngMap["4"]  || "Unknown").replace(/:$/, "").trim();
-              const songTitle  = (ngMap["2"]  || `Song #${songIdRaw}`).replace(/:$/, "").trim();
-              if (songUrl) {
-                const audioCtx = this.game.sound.context;
-                if (audioCtx.state === "suspended") await audioCtx.resume();
-                const proxiedUrl = `${PROXY_BASE}/audio-proxy?url=${encodeURIComponent(songUrl)}`;
-                const audioRes = await fetch(proxiedUrl);
-                if (!audioRes.ok) throw new Error(`audio proxy returned ${audioRes.status}`);
-                const arrayBuf = await audioRes.arrayBuffer();
-                const decoded  = await audioCtx.decodeAudioData(arrayBuf);
-                window._onlineSongBuffer = decoded;
+
+            if (ngText && ngText !== "-1") {
+                const ngParts = ngText.split("~|~");
+                const ngMap = {};
+                for (let i = 0; i + 1 < ngParts.length; i += 2) ngMap[ngParts[i]] = ngParts[i + 1];
+
+                const songData = {
+                    id:           ngMap["1"] || levelData.customSongID,
+                    title:        (ngMap["2"] || "Unknown").trim(),
+                    artistID:     ngMap["3"] || "0",
+                    artistName:   (ngMap["4"] || "Unknown").trim(),
+                    sizeMB:       ngMap["5"] || "0",
+                    videoID:      ngMap["6"] || null,
+                    youtubeURL:   ngMap["7"] ? decodeURIComponent(ngMap["7"]) : null,
+                    isScouted:    ngMap["8"] === "1",
+                    priority:     ngMap["9"] || "0",
+                    rawUrl:       (ngMap["10"] || "").trim(),
+                    nongType:     parseInt(ngMap["11"] || "0"),
+                    //extraIDs:     (ngMap["12"] || "").split("."), //array
+                    isNew:        ngMap["13"] === "1",
+                    newIconType:  ngMap["14"] || "0",
+                    extraArtists: ngMap["15"] || "" 
+                };
+
+                let songUrl = songData.rawUrl ? decodeURIComponent(songData.rawUrl) : null;
+
                 window._onlineSongKey    = songKey;
-                window._onlineSongTitle  = songTitle;
-                window._onlineSongArtist = songArtist;
+                window._onlineSongTitle  = songData.title;
+                window._onlineSongArtist = songData.artistName;
+
+                if (songUrl && songUrl.includes("b-cdn.net")) {
+                  try {
+                    const parsed = new URL(songUrl);
+                    const path = parsed.pathname;
+                    const SALT = "8501f9c2-75ba-4230-8188-51037c4da102";
+                    const expires = Math.floor(Date.now() / 1000) + 3600;
+                    const inp = `${SALT}${path}${expires}`;
+                    const md5c = (x, k) => {
+                      let a=x[0],b=x[1],c=x[2],d=x[3];
+                      const f=(p,q,r,s,x,t,u)=>{let v=p+(q&r|~q&s)+x+u;return((v<<t)|(v>>>(32-t)))+q};
+                      const g=(p,q,r,s,x,t,u)=>{let v=p+(q&s|r&~s)+x+u;return((v<<t)|(v>>>(32-t)))+q};
+                      const h=(p,q,r,s,x,t,u)=>{let v=p+(q^r^s)+x+u;return((v<<t)|(v>>>(32-t)))+q};
+                      const i=(p,q,r,s,x,t,u)=>{let v=p+(r^(q|~s))+x+u;return((v<<t)|(v>>>(32-t)))+q};
+                      a=f(a,b,c,d,k[0],7,-680876936);d=f(d,a,b,c,k[1],12,-389564586);c=f(c,d,a,b,k[2],17,606105819);b=f(b,c,d,a,k[3],22,-1044525330);
+                      a=f(a,b,c,d,k[4],7,-176418897);d=f(d,a,b,c,k[5],12,1200080426);c=f(c,d,a,b,k[6],17,-1473231341);b=f(b,c,d,a,k[7],22,-45705983);
+                      a=f(a,b,c,d,k[8],7,1770035416);d=f(d,a,b,c,k[9],12,-1958414417);c=f(c,d,a,b,k[10],17,-42063);b=f(b,c,d,a,k[11],22,-1990404162);
+                      a=f(a,b,c,d,k[12],7,1804603682);d=f(d,a,b,c,k[13],12,-40341101);c=f(c,d,a,b,k[14],17,-1502002290);b=f(b,c,d,a,k[15],22,1236535329);
+                      a=g(a,b,c,d,k[1],5,-165796510);d=g(d,a,b,c,k[6],9,-1069501632);c=g(c,d,a,b,k[11],14,643717713);b=g(b,c,d,a,k[0],20,-373897302);
+                      a=g(a,b,c,d,k[5],5,-701558691);d=g(d,a,b,c,k[10],9,38016083);c=g(c,d,a,b,k[15],14,-660478335);b=g(b,c,d,a,k[4],20,-405537848);
+                      a=g(a,b,c,d,k[9],5,568446438);d=g(d,a,b,c,k[14],9,-1019803690);c=g(c,d,a,b,k[3],14,-187363961);b=g(b,c,d,a,k[8],20,1163531501);
+                      a=g(a,b,c,d,k[13],5,-1444681467);d=g(d,a,b,c,k[2],9,-51403784);c=g(c,d,a,b,k[7],14,1735328473);b=g(b,c,d,a,k[12],20,-1926607734);
+                      a=h(a,b,c,d,k[5],4,-378558);d=h(d,a,b,c,k[8],11,-2022574463);c=h(c,d,a,b,k[11],16,1839030562);b=h(b,c,d,a,k[14],23,-35309556);
+                      a=h(a,b,c,d,k[1],4,-1530992060);d=h(d,a,b,c,k[4],11,1272893353);c=h(c,d,a,b,k[7],16,-155497632);b=h(b,c,d,a,k[10],23,-1094730640);
+                      a=h(a,b,c,d,k[13],4,681279174);d=h(d,a,b,c,k[0],11,-358537222);c=h(c,d,a,b,k[3],16,-722521979);b=h(b,c,d,a,k[6],23,76029189);
+                      a=h(a,b,c,d,k[9],4,-640364487);d=h(d,a,b,c,k[12],11,-421815835);c=h(c,d,a,b,k[15],16,530742520);b=h(b,c,d,a,k[2],23,-995338651);
+                      a=i(a,b,c,d,k[0],6,-198630844);d=i(d,a,b,c,k[7],10,1126891415);c=i(c,d,a,b,k[14],15,-1416354905);b=i(b,c,d,a,k[5],21,-57434055);
+                      a=i(a,b,c,d,k[12],6,1700485571);d=i(d,a,b,c,k[3],10,-1894986606);c=i(c,d,a,b,k[10],15,-1051523);b=i(b,c,d,a,k[1],21,-2054922799);
+                      a=i(a,b,c,d,k[8],6,1873313359);d=i(d,a,b,c,k[15],10,-30611744);c=i(c,d,a,b,k[6],15,-1560198380);b=i(b,c,d,a,k[13],21,1309151649);
+                      a=i(a,b,c,d,k[4],6,-145523070);d=i(d,a,b,c,k[11],10,-1120210379);c=i(c,d,a,b,k[2],15,718787259);b=i(b,c,d,a,k[9],21,-343485551);
+                      x[0]=(x[0]+a)|0;x[1]=(x[1]+b)|0;x[2]=(x[2]+c)|0;x[3]=(x[3]+d)|0;
+                    };
+                    const md5r = (s) => {
+                      let n=s.length,st=[1732584193,-271733879,-1732584194,271733878],i,w=[];
+                      for(i=0;i<=n;i++)w[i>>2]|=(s.charCodeAt(i)||128)<<((i%4)<<3);
+                      w[(((n+8)>>6)<<4)+14]=n*8;
+                      for(i=0;i<w.length;i+=16)md5c(st,w.slice(i,i+16));
+                      return st.map(v=>[v&0xFF,(v>>8)&0xFF,(v>>16)&0xFF,(v>>24)&0xFF]).flat();
+                    };
+                    const token = btoa(String.fromCharCode(...md5r(inp))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+                    songUrl = `${parsed.origin}${path}?token=${token}&expires=${expires}`;
+                  } catch(e) {}
+                }
+
+                if (songUrl) {
+                  const audioCtx = this.game.sound.context;
+                  if (audioCtx.state === "suspended") await audioCtx.resume();
+
+                  try {
+                      const fetchUrl = songUrl.includes("b-cdn.net")
+                        ? (window.ApiWrapper ? window.ApiWrapper.getProxy() : "https://proxy.corsfix.com/?") + songUrl
+                        : `${PROXY_BASE}/audio-proxy?url=${encodeURIComponent(songUrl)}`;
+                      const audioRes = await fetch(fetchUrl);
+                      if (!audioRes.ok) throw new Error(`audio fetch returned ${audioRes.status}`);
+                      const arrayBuf = await audioRes.arrayBuffer();
+                      const decoded  = await audioCtx.decodeAudioData(arrayBuf);
+                      window._onlineSongBuffer = decoded;
+                  } catch (error) {
+                      console.error("Failed to load audio:", error.message);
+                      window._onlineSongBuffer = null;
+                  }
+              } else {
               }
+            } else {
+                _showStatus("Song info failed to load", "#ff0000");
             }
-          } catch (songErr) {
-          }
         } else {
           window._onlineSongBuffer = null;
           window._onlineSongKey    = null;
           window._onlineSongArtist = null;
         }
-        window._onlineLevelString = levelString;
-        window._onlineLevelName   = levelName;
-        window._onlineLevelId     = "online_" + levelIdParsed;
-        this.game.registry.set("autoStartGame", true);
+        window._onlineLevelString = levelData.string;
+        window._onlineLevelName   = levelData.title;
+        window._onlineLevelId     = "online_" + levelData.id;
+
+        try {
+          const savedLevels = JSON.parse(localStorage.getItem("saved_levels") || "[]");
+          const filtered = savedLevels.filter(l => l.savedId !== "online_" + levelData.id);
+          filtered.unshift({
+            savedId: "online_" + levelData.id,
+            createdId: "online_" + levelData.id,
+            levelName: levelData.title,
+            author: levelData.author || "Unknown",
+            levelString: levelData.string,
+            levelLength: levelData.length,
+            songId: levelData.isCustomSong ? parseInt(levelData.customSongID) : -(parseInt(levelData.officialSong) + 1),
+            song: window._onlineSongTitle || "Unknown",
+            description: levelData.description || "",
+            version: levelData.version || 1,
+            status: "Online",
+            stars: levelData.stars || 0,
+            downloads: levelData.downloads || 0,
+            likes: levelData.likes || 0
+          });
+          if (filtered.length > 50) filtered.length = 50;
+          localStorage.setItem("saved_levels", JSON.stringify(filtered));
+        } catch (e) {}
+
         window.currentlevel = [
           songKey,
-          levelName,
+          window._onlineLevelName,
           window._onlineLevelId,
           [window._onlineSongArtist || "Unknown"]
         ];
-        this.time.delayedCall(600, () => {
+
+        const _playLevel = () => {
+          this.game.registry.set("autoStartGame", true);
+          this._closeLevelInfoPage();
           htmlInput.remove();
           window.removeEventListener("resize", _repositionInput);
           this._closeSearchMenu(true);
@@ -1819,9 +2696,16 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
           flash.fillRect(0, 0, sw, sh);
           this.tweens.add({
             targets: flash, alpha: 1, duration: 250, ease: "Linear",
-            onComplete: () => this.scene.restart()
+            onComplete: () => {
+              if (window._activeNongId && window._onlineSongBuffer) {
+                window._onlineSongKey = window.currentlevel[0];
+              }
+              this.scene.restart();
+            }
           });
-        });
+        };
+
+        this._showLevelInfoPage(levelData, songKey, _playLevel);
       };
       this._searchOverlayObjects.push(overlay, blocker, backBtn);
       if (window.levelID && !window.alreadydownloaded) { // if there's an ID parameter, load it directly
@@ -1860,6 +2744,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         }
         this._searchOverlayObjects = [];
         this._searchOverlay = null;
+        this._closeSearchResults = null;
       };
       if (silent) { destroy(); if (onComplete) onComplete(); return; }
       const sw = screenWidth, sh = screenHeight;
@@ -1957,6 +2842,23 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         "bird_46_001.png", "bird_47_001.png", "bird_48_001.png", "bird_49_001.png", "bird_50_001.png",
         "bird_51_001.png",
       ],
+	  robot: [
+  "robot_01_01_001.png", "robot_02_01_001.png", "robot_03_01_001.png", "robot_04_01_001.png", "robot_05_01_001.png",
+  "robot_06_01_001.png", "robot_07_01_001.png", "robot_08_01_001.png", "robot_09_01_001.png", "robot_10_01_001.png",
+  "robot_11_01_001.png", "robot_12_01_001.png", "robot_13_01_001.png", "robot_14_01_001.png", "robot_15_01_001.png",
+  "robot_16_01_001.png", "robot_17_01_001.png", "robot_18_01_001.png", "robot_19_01_001.png", "robot_20_01_001.png",
+  "robot_21_01_001.png", "robot_22_01_001.png", "robot_23_01_001.png", "robot_24_01_001.png", "robot_25_01_001.png",
+  "robot_26_01_001.png",
+],
+	  spider: [
+  "spider_01_01_001.png", "spider_02_01_001.png", "spider_03_01_001.png", "spider_04_01_001.png", "spider_05_01_001.png",
+  "spider_06_01_001.png", "spider_07_01_001.png", "spider_08_01_001.png", "spider_09_01_001.png", "spider_10_01_001.png",
+  "spider_11_01_001.png", "spider_12_01_001.png", "spider_13_01_001.png", "spider_14_01_001.png", "spider_15_01_001.png",
+  "spider_16_01_001.png", "spider_17_01_001.png",
+],
+	  swing: [
+        "swing_01_001.png",
+      ],
     };
 
 
@@ -1966,6 +2868,9 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       ball: "currentBall",
       wave: "currentWave",
       ufo: "currentBird",
+	  robot: "currentRobot",
+	  spider: "currentSpider",
+	  swing: "currentSwing",
     };
 
     const _iconAtlas = {
@@ -1974,6 +2879,9 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       ball: "GJ_GameSheetIcons",
       wave: "GJ_GameSheetIcons",
       ufo: "GJ_GameSheetIcons",
+	  robot: "GJ_GameSheetIcons",
+	  spider: "GJ_GameSheetIcons",
+	  swing: "GJ_GameSheetIcons",
     };
 
     const _tabBtnFrames = {
@@ -1982,11 +2890,23 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       ball: { on: "gj_ballBtn_on_001.png",  off: "gj_ballBtn_off_001.png"  },
       wave: { on: "gj_dartBtn_on_001.png",  off: "gj_dartBtn_off_001.png"  },
       ufo:  { on: "gj_birdBtn_on_001.png",  off: "gj_birdBtn_off_001.png"  },
+      robot: { on: "gj_robotBtn_on_001.png",  off: "gj_robotBtn_off_001.png"  },
+      spider: { on: "gj_spiderBtn_on_001.png",  off: "gj_spiderBtn_off_001.png"  },
+      swing:  { on: "gj_swingBtn_on_001.png",  off: "gj_swingBtn_off_001.png"  },
+    };
+	const convertIconFrameToGameFrame = (frame, tab) => {
+      if (tab === "robot" || tab === "spider") {
+        return frame.replace(/_01_001\.png$/, "_001.png");
+      }
+      return frame;
+    };
+    const getCanonicalIconName = (frame, tab) => {
+      return convertIconFrameToGameFrame(frame, tab).replace("_001.png", "");
     };
 
     this._openIconSelector = (startTab = "icon") => {
       if (this._iconOverlay) return;
-
+      this._uhdContext = 'icon';
       const sw = screenWidth;
       const sh = screenHeight;
 
@@ -2017,6 +2937,15 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         .setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(105);
 
       this._iconOverlayObjects = [overlay, blocker, titleTxt];
+
+      const cornerTL = this.add.image(0, 0, "GJ_GameSheet03", "GJ_sideArt_001.png").setScrollFactor(0).setDepth(100).setOrigin(1, 0).setFlipX(false).setAngle(-90);
+      this._iconOverlayObjects.push(cornerTL);
+
+      const starText = this.add.bitmapText(sw - 50, 50.5, "bigFont", String(window._totalStars || 0), 28)
+        .setScrollFactor(0).setDepth(105).setOrigin(1, 0.5);
+      const starIcon = this.add.image(starText.x + starText.width + 9, 50.5, "GJ_GameSheet03", "GJ_starsIcon_001.png")
+        .setScrollFactor(0).setDepth(105).setScale(0.65);
+      this._iconOverlayObjects.push(starIcon, starText);
 
       const backBtn = this.add.image(50, 48, "GJ_GameSheet03", "GJ_arrow_03_001.png")
         .setScrollFactor(0).setDepth(104).setFlipY(true)
@@ -2056,15 +2985,15 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
   }
       this._iconOverlayObjects.push(topBar);
 
-      const cols = 10;
+      const cols = 12;
       const iconSize = 60;
-      const padding = 18;
+      const padding = 2;
       const containerPadding = 10;
       const rows = 3;
       const containerWidth  = cols * iconSize + (cols - 1) * padding + 12;
       const containerHeight = rows * iconSize + (rows - 1) * padding + 12;
       const containerX = sw / 2 - containerWidth / 2;
-      const containerY = sh - containerHeight - containerPadding - 130;
+      const containerY = sh - containerHeight - containerPadding - 150;
       const startX = containerX + 6 + iconSize / 2;
       const startY = containerY + 6 + iconSize / 2;
 
@@ -2073,14 +3002,8 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       gridBg.fillRoundedRect(containerX, containerY, containerWidth, containerHeight, 10);
       this._iconOverlayObjects.push(gridBg);
 
-      const cornerTL = this.add.image(0,  0,  "GJ_GameSheet03", "GJ_sideArt_001.png").setScrollFactor(0).setDepth(100).setOrigin(1, 0).setFlipX(false).setAngle(-90)
-      const cornerTR = this.add.image(sw, 0,  "GJ_GameSheet03", "GJ_sideArt_001.png").setScrollFactor(0).setDepth(103).setOrigin(0, 0).setFlipY(false).setFlipX(true).setAngle(90);
-      const cornerBR = this.add.image(sw, sh, "GJ_GameSheet03", "GJ_sideArt_001.png").setScrollFactor(0).setDepth(152).setOrigin(1, 0).setFlipY(false).setAngle(90);
-      const cornerBL = this.add.image(0,  sh, "GJ_GameSheet03", "GJ_sideArt_001.png").setScrollFactor(0).setDepth(152).setOrigin(1, 1).setFlipY(true).setAngle(90)
-      this._iconOverlayObjects.push(cornerTL, cornerTR, cornerBR, cornerBL);
-
       const navDotSpacing = 35;
-      const navDotY = containerY + containerHeight + 26;
+      const navDotY = containerY + containerHeight + 30;
       const navDot1 = this.add.image(sw / 2 - navDotSpacing / 2, navDotY, "GJ_GameSheet03", "gj_navDotBtn_on_001.png").setScrollFactor(0).setDepth(104).setScale(0.75);
       const navDot2 = this.add.image(sw / 2 + navDotSpacing / 2, navDotY, "GJ_GameSheet03", "gj_navDotBtn_off_001.png").setScrollFactor(0).setDepth(104).setScale(0.75);
       const navDot3 = this.add.image(sw / 2 + navDotSpacing / 2, navDotY, "GJ_GameSheet03", "gj_navDotBtn_off_001.png").setScrollFactor(0).setDepth(104).setScale(0.75).setVisible(false);
@@ -2121,9 +3044,9 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       ];
 
       const colorBtnSize = 35;
-      const colorPadding = 4;
+      const colorPadding = 6;
       const colorRowWidth = rainbowColors.length * (colorBtnSize + colorPadding) - colorPadding;
-      const colorRow1Y = containerY + containerHeight + 70;
+      const colorRow1Y = containerY + containerHeight + 88;
       const colorRow2Y = colorRow1Y + colorBtnSize + 10;
       const colorRowStartX = sw / 2 - colorRowWidth / 2 + colorBtnSize / 2;
 
@@ -2135,33 +3058,50 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         fontSize: "11px", color: "#ffffff", fontFamily: "Arial"}).setScrollFactor(0).setDepth(104).setOrigin(0, 0.5).setAlpha(1);
       this._iconOverlayObjects.push(colorLabel2);
 
+      const colorBoxWidth = sw;
+      const colorBoxHeight = colorBtnSize * 2 + 10 + 20;
+      const colorBoxX = 0;
+      const colorBoxY = colorRow1Y - colorBtnSize / 2 - 10;
+      const colorBox = this.add.graphics().setScrollFactor(0).setDepth(101);
+      colorBox.fillStyle(0x000000, 0.5);
+      colorBox.fillRect(colorBoxX, colorBoxY, colorBoxWidth, colorBoxHeight);
+      this._iconOverlayObjects.push(colorBox);
+
+      const color1SelLabel = this.add.image(0, 0, "GJ_GameSheet03", "GJ_select_001.png").setScrollFactor(0).setDepth(106).setOrigin(0.5, 0.5).setVisible(false).setScale(0.6);
+      const color2SelLabel = this.add.image(0, 0, "GJ_GameSheet03", "GJ_select_001.png").setScrollFactor(0).setDepth(106).setOrigin(0.5, 0.5).setVisible(false).setScale(0.6);
+      this._iconOverlayObjects.push(color1SelLabel, color2SelLabel);
+
+      const _moveColorSelect = (label, color, rowY) => {
+        const idx = rainbowColors.indexOf(color);
+        if (idx === -1) {
+          label.setVisible(false);
+          return;
+        }
+
+        label.setPosition(colorRowStartX + idx * (colorBtnSize + colorPadding), rowY).setVisible(true);
+      };
+
+      _moveColorSelect(color1SelLabel, window.mainColor, colorRow1Y);
+      _moveColorSelect(color2SelLabel, window.secondaryColor, colorRow2Y);
+
       for (let ci = 0; ci < rainbowColors.length; ci++) {
         const cx = colorRowStartX + ci * (colorBtnSize + colorPadding);
 
         const btn1AtlasInfo = getAtlasFrame(this, "GJ_colorBtn_001.png");
         let btn1;
-        if (btn1AtlasInfo) {
-          btn1 = this.add.image(cx, colorRow1Y, btn1AtlasInfo.atlas, btn1AtlasInfo.frame).setScrollFactor(0).setDepth(104).setTint(rainbowColors[ci]).setScale(0.5).setInteractive();
-        } else {
-          btn1 = this.add.rectangle(cx, colorRow1Y, colorBtnSize, colorBtnSize, rainbowColors[ci]).setScrollFactor(0).setDepth(104).setInteractive();
-        }
+        btn1 = this.add.rectangle(cx, colorRow1Y, colorBtnSize, colorBtnSize, rainbowColors[ci]).setScrollFactor(0).setDepth(104).setInteractive();
         this._iconOverlayObjects.push(btn1);
 
         const btn2AtlasInfo = getAtlasFrame(this, "GJ_colorBtn_001.png");
         let btn2;
-        if (btn2AtlasInfo) {
-          btn2 = this.add.image(cx, colorRow2Y, btn2AtlasInfo.atlas, btn2AtlasInfo.frame).setScrollFactor(0).setDepth(104).setTint(rainbowColors[ci]).setScale(0.5).setInteractive();
-        } else {
-          btn2 = this.add.rectangle(cx, colorRow2Y, colorBtnSize, colorBtnSize, rainbowColors[ci]).setScrollFactor(0).setDepth(104).setInteractive();
-        }
+        btn2 = this.add.rectangle(cx, colorRow2Y, colorBtnSize, colorBtnSize, rainbowColors[ci]).setScrollFactor(0).setDepth(104).setInteractive();
         this._iconOverlayObjects.push(btn2);
 
         ((color, b1, b2) => {
-          b1.on("pointerover", () => b1.setAlpha(0.7));
-          b1.on("pointerout",  () => b1.setAlpha(1));
-          b1.on("pointerup",   () => {
+          this._makeBouncyButton(b1, 1.0, () => {
             window.mainColor = color;
             localStorage.setItem("iconMainColor", hexadecimalToHex(color));
+            _moveColorSelect(color1SelLabel, color, colorRow1Y);
             if (this._player) {
               const safeSetTint = (sprite, color) => {
                 if (sprite && sprite.setTint) {
@@ -2180,6 +3120,8 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
               safeSetTint(this._player._shipSpriteLayer?.sprite, color);
               safeSetTint(this._player._ballSpriteLayer?.sprite, color);
               safeSetTint(this._player._waveSpriteLayer?.sprite, color);
+			  safeSetTint(this._player._robotSpriteLayer?.sprite, color);
+              safeSetTint(this._player._swingSpriteLayer?.sprite, color);
               if (this._player._particleEmitter) {
                 try {
                   this._player._particleEmitter.tint = color;
@@ -2189,12 +3131,10 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
             }
             selectedIcon.setTint(color);
           });
-
-          b2.on("pointerover", () => b2.setAlpha(0.7));
-          b2.on("pointerout",  () => b2.setAlpha(1));
-          b2.on("pointerup",   () => {
+          this._makeBouncyButton(b2, 1.0, () => {
             window.secondaryColor = color;
             localStorage.setItem("iconSecondaryColor", hexadecimalToHex(color));
+            _moveColorSelect(color2SelLabel, color, colorRow2Y);
             if (this._player) {
               const safeSetTint = (sprite, color) => {
                 if (sprite && sprite.setTint) {
@@ -2220,8 +3160,8 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
                 }
               }
             }
-                selectedIconExtra.setTint(window.secondaryColor);
-                _refreshPreview(currentTab, _getPreviewFrame(currentTab));
+            selectedIconExtra.setTint(window.secondaryColor);
+            _refreshPreview(currentTab, _getPreviewFrame(currentTab));
           });
         })(rainbowColors[ci], btn1, btn2);
       }
@@ -2233,7 +3173,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       const _getPreviewFrame = (tab) => {
         const prop   = _iconWindowProps[tab];
         const frames = _iconFrameSets[tab];
-        const match  = frames.find(f => f.replace("_001.png", "") === window[prop]);
+        const match  = frames.find(f => getCanonicalIconName(f, tab) === window[prop]);
         return match || frames[0];
       };
 
@@ -2255,11 +3195,21 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       this._iconOverlayObjects.push(selectedIconExtra, selectedIcon);
 
       const tabBtnY = containerY - 40;
-      const tabKeys = ["icon", "ship", "ball", "wave", "ufo"];
-      const tabOffsets     = [-218, -109,  0,    109,   218  ];
-      const tabRotations   = { icon: -Math.PI/2, ship: 0, ball: -Math.PI/2, wave: Math.PI/2, ufo: Math.PI/2 };
-      const tabFlipXStates = { icon: true, ship: false, ball: true, wave: false, ufo: false };
-      const tabFlipYStates = { icon: false, ship: false, ball: false, wave: true, ufo: true };
+      const tabKeys = ["icon", "ship", "ball", "ufo", "wave", "robot", "spider", "swing"];
+      const tabSpacing = 65;
+      const tabOffsets = {
+        icon: -tabSpacing * 3.5,
+        ship: -tabSpacing * 2.5,
+        ball: -tabSpacing * 1.5,
+        ufo: -tabSpacing * 0.5,
+        wave: tabSpacing * 0.5,
+        robot: tabSpacing * 1.5,
+        spider: tabSpacing * 2.5,
+        swing: tabSpacing * 3.5,
+      };
+      const tabRotations = { icon: -Math.PI/2, ship: 0, ball: -Math.PI/2, ufo: Math.PI/2, wave: Math.PI/2, robot: 0, spider: 0 };
+      const tabFlipXStates = { icon: true, ship: false, ball: true, ufo: false, wave: false, robot: false, spider: false, swing: false };
+      const tabFlipYStates = { icon: false, ship: false, ball: false, ufo: true, wave: true, robot: false, spider: false, swing: false };
       const tabBtnSprites  = {};
 
       const _switchTab = (tab) => {
@@ -2275,7 +3225,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
 
       tabKeys.forEach((tab, i) => {
         const isActive = tab === startTab;
-        const btn = this.add.image(sw / 2 + tabOffsets[i], tabBtnY, "GJ_GameSheet03",
+        const btn = this.add.image(sw / 2 + tabOffsets[tab], tabBtnY, "GJ_GameSheet03",
             isActive ? _tabBtnFrames[tab].on : _tabBtnFrames[tab].off)
           .setScrollFactor(0).setDepth(104).setScale(0.75)
           .setRotation(tabRotations[tab]).setFlipX(tabFlipXStates[tab]).setFlipY(tabFlipYStates[tab])
@@ -2349,7 +3299,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
             : null;
           if (extraImg) this._iconGridObjects.push(extraImg);
           this._iconGridObjects.push(iconImg, hitRect);
-          if (frame.replace("_001.png", "") === window[prop]) {
+          if (getCanonicalIconName(frame, tab) === window[prop]) {
             selLabel.setPosition(ix, iy).setScale(0.75).setVisible(true);
           }
 
@@ -2375,7 +3325,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
 
               selLabel.setPosition(capturedImg.x, capturedImg.y).setScale(0.75).setVisible(true);
 
-              window[prop] = capturedFrame.replace("_001.png", "");
+              window[prop] = getCanonicalIconName(capturedFrame, tab);
               localStorage.setItem("icon" + prop.charAt(0).toUpperCase() + prop.slice(1), window[prop]);
 
               if (tab === "icon" && this._player) {
@@ -2455,6 +3405,20 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
                   const layer = this._player[lp];
                   if (!layer || !layer.sprite) continue;
                   const found = getAtlasFrame(this, `${window.currentBird}${suffix}`);
+                  if (found) {
+                    layer.sprite.setTexture(found.atlas, found.frame);
+                    if (tint !== null) layer.sprite.setTint(tint);
+                  }
+                }
+              }
+              if (tab === "robot" && this._player) {
+                const layerMap = [
+                  { lp: "_robotSpriteLayer", suffix: "_001.png", tint: window.mainColor },
+                ];
+                for (const { lp, suffix, tint } of layerMap) {
+                  const layer = this._player[lp];
+                  if (!layer || !layer.sprite) continue;
+                  const found = getAtlasFrame(this, `${window.currentRobot}${suffix}`);
                   if (found) {
                     layer.sprite.setTexture(found.atlas, found.frame);
                     if (tint !== null) layer.sprite.setTint(tint);
@@ -2575,6 +3539,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     this._spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this._upKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
     this._wKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+    this._enterKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this._lKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L);
     this._leftKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
     this._rightKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
@@ -2615,6 +3580,19 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       .setDepth(100)
       .setVisible(false);
 
+    this._cpsIndicator = this.add.bitmapText(10, 70, "bigFont", "0 CPS", 20)
+      .setOrigin(0, 0)
+      .setAlpha(0.4)
+      .setDepth(100)
+      .setVisible(false);
+
+    this._bottedIndicator = this.add.bitmapText(10, 70, "bigFont", "Botted", 20)
+      .setOrigin(0, 0)
+      .setAlpha(0.4)
+      .setDepth(100)
+      .setTint(0xff0000)
+      .setVisible(false);
+
     this.noclipFlash = this.add.rectangle(
       this.cameras.main.centerX, 
       this.cameras.main.centerY, 
@@ -2628,12 +3606,17 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
 
     this._updatePracticeHUDBar = () => {};
 
-    this._pauseBtn = this.add.image(screenWidth - 30, 30, "GJ_WebSheet", "GJ_pauseBtn_clean_001.png").setScrollFactor(0).setDepth(30).setAlpha(75 / 255).setVisible(false);
+    this._pauseBtn = this.add.image(screenWidth - 30, 30, "GJ_GameSheet03", "GJ_pauseBtn_clean_001.png").setScrollFactor(0).setDepth(30).setAlpha(75 / 255).setVisible(false);
     this._pauseBtn.setInteractive();
     this._expandHitArea(this._pauseBtn, 2);
     this._pauseBtn.on("pointerdown", () => this._pauseGame());
     this._escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this._escKey.on("down", () => {
+      // Level info page sits on top of search results / saved menu — close just it
+      if (this._levelInfoContainer) {
+        this._closeLevelInfoPage();
+        return;
+      }
       if (this._levelSelectOverlay) {
         this._closeLevelSelect();
         return;
@@ -2647,6 +3630,11 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         return;
       } 
       if (this._searchOverlay) {
+        // Results list open: step back to the search menu, not all the way out
+        if (this._searchResultsOpen && this._closeSearchResults) {
+          this._closeSearchResults();
+          return;
+        }
         this._closeSearchMenu(true);
         this._openCreatorMenu();
         return;
@@ -2655,13 +3643,38 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         this._closeOnlineLevelsScene();
         return;
       }
+      if (this._savedOverlay) {
+        if (this._savedCurrentFolder) {
+          this._closeSavedMenu(true);
+          this._openSavedMenu();
+        } else {
+          this._closeSavedMenu();
+          this._openCreatorMenu();
+        }
+        return;
+      }
+      if (this._editorOverlay) {
+        this._closeEditorMenu();
+        this._openCreatorMenu();
+        return;
+      }
       if (this._creatorOverlay) {
         this._closeCreatorMenu();
         return;
       }
+      if (this._questPopup) {
+        this._questPopup.destroy();
+        this._questPopup = null;
+        return;
+      }
       if (this._settingsPopup) {
-        this._settingsPopup.destroy();
-        this._settingsPopup = null;
+        this._closeSettingsPopup();
+        return;
+      }
+      if (this._macroPopup) {
+        this.events.off("update", this._refreshMacroButtons);
+        this._macroPopup.destroy();
+        this._macroPopup = null;
         return;
       }
       if (this._settingsLayerOverlay) {
@@ -2678,6 +3691,26 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       if (this._newgroundsPopup) {
         this._closeNewgroundsPopup();
         return;
+      }
+      if (this._achLayerOverlay) {
+        this._hideAchievementsScreen();
+        return;
+      }
+      if (this._editorColorPickerPopup) {
+          this._closeEditorColorPickerPopup();
+          return;
+      }
+      if (this._editorHorizontalOptionPopup) {
+          this._closeEditorHorizontalOptionPopup();
+          return;
+      }
+      if (this._editorStartOptionsPopup) {
+          this._closeEditorStartOptionsPopup();
+          return;
+      }
+      if (this._editorLevelSettingsPopup) {
+          this._closeEditorLevelSettingsPopup();
+          return;
       }
       if (this._statsLayerOverlay) {
         this._hideStatsScreen();
@@ -2728,6 +3761,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     this._paused = false;
     this._pauseContainer = null;
     this._sfxVolume = localStorage.getItem("userSfxVol") ?? 1;
+    this._initMacroBot();
     this.input.on("pointerdown", () => {
       if (!this._menuActive && !this._paused && !this._levelSelectOverlay && !this._levelWon && !window.isEditor) {
         this._pushButton();
@@ -2740,11 +3774,11 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     });
     if (!window.gdpointerup) {
       window.gdpointerup = true;
-      window.addEventListener("pointerup", () => this._releaseButton());
+      window.addEventListener("pointerup", () => this._releaseButton(true));
     }
     if (!window.gdtouchend) {
       window.gdtouchend = true;
-      window.addEventListener("touchend", () => this._releaseButton());
+      window.addEventListener("touchend", () => this._releaseButton(true));
     }
     this.scale.on("enterfullscreen", () => this._onFullscreenChange(true));
     this.scale.on("leavefullscreen", () => this._onFullscreenChange(false));
@@ -2798,18 +3832,12 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     const menuMusicEnabled = localStorage.getItem("menuMusicEnabled");
     const shouldPlayMenuMusic = menuMusicEnabled === null ? true : menuMusicEnabled === "true";
     
-    if (!this._audio.isplaying() && shouldPlayMenuMusic) {
+    if (window.isEditor) {
+      this._audio.stopMusic();
+    } else if (!this._audio.isplaying() && shouldPlayMenuMusic) {
       this._audio.startMenuMusic();
     } else if (this._audio.isplaying() && !shouldPlayMenuMusic) {
       this._audio.stopMusic();
-    }
-    if (window._returnToEditorMenu) {
-      window._returnToEditorMenu = false;
-      this.time.delayedCall(100, () => {
-        if (!this._editorOverlay) {
-          this._openEditorMenu();
-        }
-      });
     }
     if (!window.updateLogShown) {
       this._buildUpdateLogPopup();
@@ -2817,18 +3845,27 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     }
     if (window.levelID) {
         this._openSearchMenu();
-        // Clear after use so re-entering scene (exit level) doesn't re-trigger
-        window.levelID = null;
     }
     if (this.game.registry.get("autoStartGame")) {
-      this.game.registry.remove("autoStartGame");
-      this._levelLabel.setVisible(false);
-      this._leftBtn.setVisible(false);
-      this._rightBtn.setVisible(false);
-      if (this._practiceModeBarContainer) {
-        this._practiceModeBarContainer.setVisible(this._practicedMode && this._practicedMode.practiceMode);
+      if (!window.settingsMap) {
+        const cachedLevelText = this.cache.text.get(window.currentlevel[2]) ||
+          ((window._onlineLevelString && window.currentlevel[2] === window._onlineLevelId) ? window._onlineLevelString : null);
+        if (cachedLevelText) {
+          this._level.loadLevel(cachedLevelText);
+        }
       }
-      this._startGame();
+      if (window.settingsMap) {
+        this.game.registry.remove("autoStartGame");
+        this._levelLabel.setVisible(false);
+        this._leftBtn.setVisible(false);
+        this._rightBtn.setVisible(false);
+        if (this._practiceModeBarContainer) {
+          this._practiceModeBarContainer.setVisible(this._practicedMode && this._practicedMode.practiceMode);
+        }
+        this._startGame();
+      } else {
+        console.warn("autoStartGame: missing settingsMap for", window.currentlevel && window.currentlevel[2]);
+      }
     }
   }
   _parseLevelColors(levelId) {
@@ -2847,6 +3884,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
   }
   _openLevelSelect() {
     if (this._levelSelectOverlay) return;
+    this._uhdContext = 'levelSelect';
     const sw = screenWidth;
     const sh = screenHeight;
     const cx = sw / 2;
@@ -3058,13 +4096,32 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       } else {
         if (ptr.x >= cardX - cardW/2 && ptr.x <= cardX + cardW/2 &&
             ptr.y >= cardY - cardH/2 && ptr.y <= cardY + cardH/2) {
-          this.tweens.killTweensOf(cardBounceContainer, "scale");
-          cardBounceContainer.setScale(1);
-          this._audio.playEffect("playSound_01", { volume: 1 });
-          this._closeLevelSelect(true);
-          this._audio.stopMusic();
-          this.game.registry.set("autoStartGame", true);
-          this.scene.restart();
+            
+            this.input.enabled = false;
+            this.tweens.killTweensOf(cardBounceContainer, "scale");
+            cardBounceContainer.setScale(1);
+
+            const lvl = window.currentlevel; 
+            const songID = lvl[0];
+            const levelFileName = lvl[2];
+            const songFileName = (typeof lvl[4] === "string") ? lvl[4] : lvl[1].replaceAll(" ", "");
+            
+            const loadingText = this.add.bitmapText(cx, cy, "goldFont", "Downloading Level Assets...", 20).setOrigin(0.5).setDepth(200);
+            
+            this.load.text(levelFileName, "assets/levels/" + levelFileName.split("_")[1] + ".txt");
+            this.load.audio(songID, "assets/music/" + songFileName + ".mp3");
+
+            this.load.once("complete", () => {
+                loadingText.destroy();
+                this._audio.playEffect("playSound_01", { volume: 1 });
+                this._closeLevelSelect(true);
+                this._audio.stopMusic();
+                this.input.enabled = true;
+                this.game.registry.set("autoStartGame", true);
+                this.scene.restart(); 
+            });
+
+            this.load.start();
         } else {
           this.tweens.killTweensOf(cardBounceContainer, "scale");
           this.tweens.add({ targets: cardBounceContainer, scale: 1, duration: 200, ease: "Quad.Out" });
@@ -3161,6 +4218,53 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       nameLabel.setPosition(groupStartX + scaledIconW + scaledGap - cardX, 0);
       cardContentObjs.push(nameLabel);
       cardBounceContainer.add(nameLabel);
+      const levelStars = lvl[4] || 0;
+      if (levelStars > 0) {
+        const starIconScale = 0.7;
+        const starIcon = this.add.image(cardW / 1.98 - 30, -cardH / 2 + 28, "GJ_GameSheet03", "GJ_starsIcon_001.png")
+          .setScrollFactor(0).setDepth(155).setScale(starIconScale);
+        const starText = this.add.bitmapText(cardW / 2 - 48, -cardH / 2 + 28, "bigFont", String(levelStars), 28)
+          .setScrollFactor(0).setDepth(200).setOrigin(1, 0.5).setTint(0xf9ff32);
+        const completedSet = JSON.parse(localStorage.getItem("gd_completedSet") || "[]");
+        if (completedSet.includes(levelId)) {
+          starText.setTint(0xffff00);
+        } else {
+          starText.setTint(0xffffff);
+        }
+        cardContentObjs.push(starIcon, starText);
+        cardBounceContainer.add([starIcon, starText]);
+      }
+      if (levelStars > 0) {
+        const maxOrbs = this._starsToOrbs(levelStars);
+        const bestPct = parseFloat(localStorage.getItem("bestPercent_" + levelId) || "0");
+        const completedSet2 = JSON.parse(localStorage.getItem("gd_completedSet") || "[]");
+        const progressOrbs = Math.round(maxOrbs * 0.8 * bestPct / 100);
+        const completionOrbs = completedSet2.includes(levelId) ? Math.round(maxOrbs * 0.2) : 0;
+        const earnedOrbs = progressOrbs + completionOrbs;
+        const orbText = this.add.bitmapText(-cardW / 2 + 65, cardH / 2 - 30, "bigFont", earnedOrbs + "/" + maxOrbs, 20)
+          .setScrollFactor(0).setDepth(155).setOrigin(0, 0.5).setTint(0xFFFFFF);
+        const orbIcon = this.add.image(-cardW / 2 + 45, cardH / 2 - 30, "GJ_GameSheet03", "currencyOrbIcon_001.png")
+          .setScrollFactor(0).setDepth(155).setScale(0.65);
+        cardContentObjs.push(orbText, orbIcon);
+        cardBounceContainer.add([orbText, orbIcon]);
+      }
+      const levelCoinCount = lvl[5] || 0;
+      if (levelCoinCount > 0) {
+        let savedCoins;
+        try { savedCoins = JSON.parse(localStorage.getItem("coins_" + levelId) || "[]"); } catch(e) { savedCoins = []; }
+        const coinSpacing = 50;
+        const coinsGroupW = (levelCoinCount - 1) * coinSpacing;
+        const coinBaseX = cardW / 2.2 - 50 - coinsGroupW / 2;
+        const coinY = cardH / 2 - 30;
+        for (let i = 0; i < levelCoinCount; i++) {
+          const collected = savedCoins.includes(i);
+          const coinFrame = collected ? "GJ_coinsIcon_001.png" : "GJ_coinsIcon_gray_001.png";
+          const coinIcon = this.add.image(coinBaseX + i * coinSpacing, coinY, "GJ_GameSheet03", coinFrame)
+            .setScrollFactor(0).setDepth(155).setScale(0.95);
+          cardContentObjs.push(coinIcon);
+          cardBounceContainer.add(coinIcon);
+        }
+      }
     };
     const barAreaY = cardY + cardH / 2 + 100;
     const barW2 = Math.min(600, sw - 200);
@@ -3270,6 +4374,11 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
             }
             cardContentObjs.length = 0;
             barObjs.length = 0;
+            // update() resets _uhdContext to null every frame; this runs from a "preupdate"
+            // handler on a later frame than _openLevelSelect()'s synchronous build, so it must
+            // re-assert the tag before creating new icons or their UHD overlays get group:null
+            // and stay hidden forever (same bug/fix as the settings-popup page rebuild).
+            this._uhdContext = 'levelSelect';
             drawCardBg(newColors.bgHex, dark);
             buildCardContent();
             buildBar();
@@ -3402,6 +4511,18 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
 
         this._makeBouncyButton(leftArrow, 0.6, () => this.changeStartPos(-1));
         this._makeBouncyButton(rightArrow, 0.6, () => this.changeStartPos(1));
+        this._startPosFadeTimer = null;
+  }
+  _resetStartPosFade() {
+    if (!this._startPosGui) return;
+    this._startPosGui.setAlpha(1);
+    if (this._startPosFadeTimer) { this._startPosFadeTimer.remove(); this._startPosFadeTimer = null; }
+    if (this._startPosFadeTween) { this._startPosFadeTween.stop(); this._startPosFadeTween = null; }
+    this._startPosFadeTimer = this.time.delayedCall(5000, () => {
+      this._startPosFadeTween = this.tweens.add({
+        targets: this._startPosGui, alpha: 0, duration: 800, ease: "Quad.Out"
+      });
+    });
   }
   changeStartPos(direction) {
         if (this._paused || this._levelWon || this._menuActive || this._slideIn) return;
@@ -3422,12 +4543,18 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         if (this._startPosText) {
             const currentId = this._startPosIndex === -1 ? 0 : (this._startPosIndex + 1);
             this._startPosText.setText(`${currentId}/${totalPositions}`);
+            this._resetStartPosFade();
         }
 
         this._practicedMode.clearCheckpoints();
         this._restartLevel();
   }
   toggleGlitter(_0x34c21a) {
+    if (this._editorPlaytestActive) {
+      this._glitterEmitter.stop();
+      return;
+    }
+
     if (_0x34c21a) {
       this._glitterEmitter.start();
     } else {
@@ -3450,7 +4577,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     }
   }
   _pauseGame() {
-    if (!this._paused && !this._menuActive && !this._slideIn && !this._state.isDead && !this._levelWon) {
+    if (!this._paused && !this._menuActive && !this._slideIn && !this._levelWon) {
       this._paused = true;
       this._pauseBtn.setVisible(false);
       this._audio.pauseMusic();
@@ -3495,6 +4622,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     return _0x4864cc;
   }
 _buildPauseOverlay() {
+    this._uhdContext = 'pause';
     const textureY = screenWidth / 2;
     const _0xf70e04 = 320;
     const _0x4eb71b = screenWidth - 40;
@@ -3523,6 +4651,10 @@ _buildPauseOverlay() {
     this._expandHitArea(settingsBtn, 2.5);
     this._pauseContainer.add(settingsBtn);
     this._makeBouncyButton(settingsBtn, 0.64, () => this._buildSettingsPopup());
+
+    this._macroBtn = this.add.image(textureY + _0x4eb71b / 2 - 60, 150, "macroBot").setScale(0.4).setInteractive();
+    this._pauseContainer.add(this._macroBtn);
+    this._makeBouncyButton(this._macroBtn, 0.4, () => this._buildMacroPopup());
 
     this._pauseContainer.add(this.add.bitmapText(textureY, 65, "bigFont", window.currentlevel[1], 40).setOrigin(0.5, 0.5));
 
@@ -3556,26 +4688,26 @@ _buildPauseOverlay() {
 
     const _0x4791ac = [
         { frame: this._practicedMode.practiceMode ? "GJ_normalBtn_001.png" : "GJ_practiceBtn_001.png", atlas: "GJ_GameSheet03", action: null },
-        { frame: "GJ_playBtn2_001.png", atlas: "GJ_WebSheet", action: () => this._resumeGame() },
-        { frame: "GJ_menuBtn_001.png", atlas: "GJ_WebSheet", action: () => {
+        { frame: "GJ_playBtn2_001.png", atlas: "GJ_GameSheet03", action: () => this._resumeGame() },
+        { frame: "GJ_menuBtn_001.png", atlas: "GJ_GameSheet03", action: () => {
             this._audio.playEffect("quitSound_01");
             this._audio.stopMusic();
             this._resumeGame();
             this.scene.restart();
         }},
-        { frame: "GJ_replayBtn_001.png", atlas: "GJ_WebSheet", action: () => {
+        { frame: "GJ_replayBtn_001.png", atlas: "GJ_GameSheet03", action: () => {
             this._resumeGame();
             this._restartLevel();
         }}
     ];
 
     const _0x25aa59 = _0x4791ac.map(btn => this.textures.getFrame(btn.atlas, btn.frame)?.width || 123);
-    let _0x599a9b = textureY - (_0x25aa59.reduce((a, b) => a + b, 0) + (_0x4791ac.length - 1) * 40) / 2;
+    let _0x599a9b = textureY - (_0x25aa59.reduce((a, b) => a + b, 0) + (_0x4791ac.length - 1) * 40) / 2 - 15;
 
     for (let i = 0; i < _0x4791ac.length; i++) {
         const item = _0x4791ac[i];
         const width = _0x25aa59[i];
-        const btn = this.add.image(_0x599a9b + width / 2, 390, item.atlas, item.frame).setInteractive();
+        const btn = this.add.image(_0x599a9b + width / 2, 405, item.atlas, item.frame).setInteractive();
         
         if (item.action === null) {
             this._pausePracticeBtn = btn;
@@ -3630,6 +4762,7 @@ _buildPauseOverlay() {
  }
 _buildSettingsPopup() {
     if (this._settingsPopup) return;
+    this._uhdContext = 'settings';
 
     const centerX = screenWidth / 2,
         centerY = 320,
@@ -3641,47 +4774,167 @@ _buildSettingsPopup() {
     const dim = this.add.rectangle(centerX, centerY, screenWidth, screenHeight, 0, 150 / 255).setInteractive();
     this._settingsPopup.add(dim);
 
-    const corner = 0.325 * this.textures.get("GJ_square01").source[0].width;
-    const panel = this._drawScale9(centerX, centerY, panelWidth, panelHeight, 'GJ_square01', corner, 16777215, 1);
-    this._settingsPopup.add(panel);
+    const innerContainer = this.add.container(centerX, centerY).setScale(0);
+    this._settingsPopup.add(innerContainer);
 
-    const closeBtn = this.add.image(centerX - (panelWidth / 2) + 10, centerY - (panelHeight / 2) + 10, 'GJ_WebSheet', "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
-    this._settingsPopup.add(closeBtn);
-    this._makeBouncyButton(closeBtn, 0.8, () => {
-        this._settingsPopup.destroy();
-        this._settingsPopup = null;
-    });
+    const corner = 0.325 * this.textures.get("GJ_square01").source[0].width;
+    const panel = this._drawScale9(0, 0, panelWidth, panelHeight, 'GJ_square01', corner, 16777215, 1);
+    innerContainer.add(panel);
+
+    const closeBtn = this.add.image(-(panelWidth / 2) + 10, -(panelHeight / 2) + 10, 'GJ_GameSheet03', "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
+    innerContainer.add(closeBtn);
+    this._makeBouncyButton(closeBtn, 0.8, () => this._closeSettingsPopup());
+
     const pages = ["Gameplay", "Visual"];
     let currentPage = 0;
-    const pageTitle = this.add.bitmapText(centerX, centerY - (panelHeight / 2) + 45, "bigFont", pages[currentPage], 40).setOrigin(0.5);
-    this._settingsPopup.add(pageTitle);
-    const leftArrow = this.add.image(centerX - (panelWidth / 2) - 130, centerY, "GJ_GameSheet03", "GJ_arrow_01_001.png")
+    const pageTitle = this.add.bitmapText(0, -(panelHeight / 2) + 45, "bigFont", pages[currentPage], 40).setOrigin(0.5);
+    innerContainer.add(pageTitle);
+    const leftArrow = this.add.image(-(panelWidth / 2) - 130, 0, "GJ_GameSheet03", "GJ_arrow_01_001.png")
         .setFlipX(false).setInteractive();
-    this._settingsPopup.add(leftArrow);
-    const rightArrow = this.add.image(centerX + (panelWidth / 2) + 130, centerY, "GJ_GameSheet03", "GJ_arrow_01_001.png")
+    innerContainer.add(leftArrow);
+    const rightArrow = this.add.image((panelWidth / 2) + 130, 0, "GJ_GameSheet03", "GJ_arrow_01_001.png")
         .setInteractive().setFlipX(true);
-    this._settingsPopup.add(rightArrow);
-    const column1X = centerX - 200;
-    const column2X = centerX + 200;
+    innerContainer.add(rightArrow);
+    const column1X = -200;
+    const column2X = 200;
     const checkOffset = -120;
     const textOffset = -70;
     const spacingY = 70;
-    const startY = centerY - 150;
+    const startY = -150;
     let pageContainer = this.add.container(0, 0);
-    this._settingsPopup.add(pageContainer);
+    innerContainer.add(pageContainer);
 
-    const createToggle = (container, x, y, label, getVal, setVal, callback = null) => {
+    const createToggle = (container, x, y, label, getVal, setVal, callback = null, fontSize = 25) => {
         const getTex = () => getVal() ? "GJ_checkOn_001.png" : "GJ_checkOff_001.png";
         const check = this.add.image(x + checkOffset, y, "GJ_GameSheet03", getTex()).setScale(0.8).setInteractive();
-        const txt = this.add.bitmapText(x + textOffset, y, "bigFont", label, 25).setOrigin(0, 0.5);
+        const txt = this.add.bitmapText(x + textOffset, y, "bigFont", label, fontSize).setOrigin(0, 0.5);
         container.add([check, txt]);
 
         this._makeBouncyButton(check, 0.8, () => {
             setVal(!getVal());
             check.setTexture("GJ_GameSheet03", getTex());
             if (callback) callback(getVal());
-            this._saveSettings();
+            if (this._saveSettings) this._saveSettings();
         });
+    };
+    const createNumberInput = (container, x, y, label, getVal, setVal) => {
+        const txt = this.add.bitmapText(x + textOffset, y, "bigFont", label, 25).setOrigin(0, 0.5);
+        container.add(txt);
+
+        const boxX = x + checkOffset;
+        const boxY = y;
+        const boxW = 64;
+        const boxH = 48;
+
+        const bgBoxGraphics = this.add.graphics();
+        bgBoxGraphics.fillStyle(0x222222, 0.5);
+        bgBoxGraphics.fillRoundedRect(boxX - boxW / 2, boxY - boxH / 2, boxW, boxH, 8);
+        container.add(bgBoxGraphics);
+
+        const hitArea = this.add.rectangle(boxX, boxY, boxW, boxH, 0x000000, 0)
+            .setOrigin(0.5)
+            .setInteractive({ useHandCursor: true });
+        container.add(hitArea);
+
+        let initialVal = getVal() || 1;
+        const valueTxt = this.add.bitmapText(boxX, boxY, "bigFont", initialVal.toString(), 28)
+            .setOrigin(0.5);
+        container.add(valueTxt);
+
+        let isFocused = false;
+        let internalString = initialVal.toString();
+
+        const updateDisplay = () => {
+            if (isFocused) {
+                valueTxt.setText(internalString + "|");
+            } else {
+                valueTxt.setText(internalString || " ");
+            }
+        };
+
+        const commitValue = () => {
+            isFocused = false;
+
+            let val = parseFloat(internalString);
+            if (isNaN(val)) val = 1;
+
+            if (val < 0.1) val = 0.1;
+            if (val > 10) val = 10;
+
+            internalString = val.toString();
+            valueTxt.setText(internalString);
+            
+            setVal(val);
+            if (this._saveSettings) this._saveSettings();
+        };
+
+        hitArea.on('pointerdown', (pointer, localX, localY, event) => {
+            if (event) event.stopPropagation();
+            
+            if (window._activeCustomInput && window._activeCustomInput !== commitValue) {
+                window._activeCustomInput();
+            }
+
+            isFocused = true;
+            window._activeCustomInput = commitValue;
+            
+            internalString = ""; 
+            updateDisplay();
+        });
+
+        const outsideClickListener = () => {
+            if (isFocused) commitValue();
+        };
+        dim.on('pointerdown', outsideClickListener);
+
+        const keydownListener = (event) => {
+            if (!isFocused) return;
+
+            const key = event.key;
+
+            if (key === "Enter") {
+                event.preventDefault();
+                commitValue();
+                return;
+            }
+
+            if (key === "Backspace") {
+                event.preventDefault();
+                internalString = internalString.slice(0, -1);
+                updateDisplay();
+                return;
+            }
+
+            if (/^[0-9.]$/.test(key)) {
+                event.preventDefault();
+                
+                if (key === "." && internalString.includes(".")) return;
+
+                const parts = internalString.split('.');
+                
+                if (key === ".") {
+                    if (parts[0].length === 0) return;
+                } else {
+                    if (parts.length === 1 && parts[0].length >= 2) return;
+                    if (parts.length === 2 && parts[1].length >= 2) return;
+                }
+
+                internalString += key;
+                updateDisplay();
+            }
+        };
+
+        window.addEventListener('keydown', keydownListener);
+
+        const originalDestroy = container.destroy;
+        container.destroy = (...args) => {
+            window.removeEventListener('keydown', keydownListener);
+            if (dim) dim.off('pointerdown', outsideClickListener);
+            if (window._activeCustomInput === commitValue) {
+                window._activeCustomInput = null;
+            }
+            originalDestroy.apply(container, args);
+        };
     };
 
     const buildGameplayPage = (container) => {
@@ -3704,6 +4957,7 @@ _buildSettingsPopup() {
                 if (this._startPosGui) this._startPosGui.setVisible(v);
                 const total = this._level.getStartPositions().length;
                 if (this._startPosText) this._startPosText.setText(`0/${total}`);
+                if (v) this._resetStartPosFade();
             }
         );
 
@@ -3712,9 +4966,25 @@ _buildSettingsPopup() {
             (v) => window.noClip = v,
             (v) => { if (this._noclipIndicator) this._noclipIndicator.setVisible(v); }
         );
+        
         createToggle(container, column1X, startY + (spacingY * 4), "Noclip Accuracy",
             () => window.noClipAccuracy,
             (v) => window.noClipAccuracy = v
+        );
+        
+        createToggle(container, column1X, startY + (spacingY * 5), "Macro Bot",
+            () => window.macroBot,
+            (v) => window.macroBot = v
+        );
+
+        createNumberInput(container, column2X, startY, "Speedhack",
+            () => window.speedHack,
+            (v) => window.speedHack = v
+        );
+
+        createNumberInput(container, column2X, startY + spacingY, "Respawn Time",
+            () => window.respawnTime,
+            (v) => window.respawnTime = v
         );
     };
 
@@ -3752,24 +5022,183 @@ _buildSettingsPopup() {
             () => window.solidWave, 
             (v) => window.solidWave = v
         );
+        
+        createToggle(container, column1X, startY + (spacingY * 5), "Show CPS",
+            () => window.showCPS,
+            (v) => window.showCPS = v
+        );
+
+        createToggle(container, column2X, startY, "Object Glow",
+            () => window.showObjectGlow,
+            (v) => window.showObjectGlow = v,
+            (v) => { this._level._updateGlowVisibility(); }
+        );
+
+        createToggle(container, column2X, startY + (spacingY), "Create Object ID labels",
+            () => window.createObjectIds,
+            (v) => window.createObjectIds = v,
+            null, 17
+        );
+
+        createToggle(container, column2X, startY + (spacingY * 2), "Show Object ID labels",
+            () => window.showObjectIds,
+            (v) => window.showObjectIds = v,
+            null, 17
+        );
     };
 
     const buildPage = (idx) => {
+        // update() clears _uhdContext to null every frame, so by the time this runs (inside
+        // an async pointerup handler, long after the frame that opened this popup) it's no
+        // longer 'settings' — re-assert it or every add.image() below tags its UHD overlay
+        // with group:null, permanently hiding it (_effectiveCtx is 'settings' while this
+        // popup is open, so group:null never matches and the checkbox overlay disappears).
+        this._uhdContext = 'settings';
         pageContainer.destroy();
         pageContainer = this.add.container(0, 0);
-        this._settingsPopup.add(pageContainer);
+        innerContainer.add(pageContainer);
         pageTitle.setText(pages[idx]);
+
         if (idx === 0) buildGameplayPage(pageContainer);
         else if (idx === 1) buildVisualPage(pageContainer);
     };
+
     buildPage(0);
+
     this._makeBouncyButton(leftArrow, 1, () => {
         currentPage = (currentPage - 1 + pages.length) % pages.length;
         buildPage(currentPage);
     });
+
     this._makeBouncyButton(rightArrow, 1, () => {
         currentPage = (currentPage + 1) % pages.length;
         buildPage(currentPage);
+    });
+    this.tweens.add({
+        targets: innerContainer,
+        scale: 1,
+        duration: 660,
+        ease: "Elastic.Out",
+        easeParams: [1, 0.6]
+    });
+  }
+  _closeSettingsPopup() {
+    if (!this._settingsPopup) return;
+    this._settingsPopup.destroy();
+    this._settingsPopup = null;
+    // Options is opened from the Settings screen with the Settings screen merely hidden
+    // (not destroyed) so it can reappear here, rather than dropping back to the pause/main menu.
+    if (this._settingsLayerInternal) this._settingsLayerInternal.setVisible(true);
+    if (this._settingsLayerOverlay) this._settingsLayerOverlay.setVisible(true);
+  }
+  // Graphics menu (Settings screen > Graphics), styled after GD's Video Options popup.
+  // Reuses this._settingsPopup so close/ESC handling and the UHD context chain behave
+  // exactly like Options.
+  _buildGraphicsPopup() {
+    if (this._settingsPopup) return;
+    this._uhdContext = 'settings';
+
+    const centerX = screenWidth / 2,
+        centerY = 320,
+        panelWidth = 700,
+        panelHeight = 440;
+
+    this._settingsPopup = this.add.container(0, 0).setScrollFactor(0).setDepth(250);
+
+    const dim = this.add.rectangle(centerX, centerY, screenWidth, screenHeight, 0, 150 / 255).setInteractive();
+    this._settingsPopup.add(dim);
+
+    const innerContainer = this.add.container(centerX, centerY).setScale(0);
+    this._settingsPopup.add(innerContainer);
+
+    const corner = 0.325 * this.textures.get("GJ_square01").source[0].width;
+    const panel = this._drawScale9(0, 0, panelWidth, panelHeight, 'GJ_square01', corner, 16777215, 1);
+    innerContainer.add(panel);
+
+    const closeBtn = this.add.image(-(panelWidth / 2) + 10, -(panelHeight / 2) + 10, 'GJ_GameSheet03', "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
+    innerContainer.add(closeBtn);
+    this._makeBouncyButton(closeBtn, 0.8, () => this._closeSettingsPopup());
+
+    innerContainer.add(this.add.bitmapText(0, -(panelHeight / 2) + 45, "goldFont", "Video Options", 46).setOrigin(0.5));
+
+    // checkX/labelX are the checkbox centre and the label's left edge
+    const makeCheckbox = (checkX, y, label, fontSize, getVal, setVal) => {
+        const getTex = () => getVal() ? "GJ_checkOn_001.png" : "GJ_checkOff_001.png";
+        const check = this.add.image(checkX, y, "GJ_GameSheet03", getTex()).setScale(0.9).setInteractive();
+        const txt = this.add.bitmapText(checkX + 38, y, "bigFont", label, fontSize).setOrigin(0, 0.5);
+        innerContainer.add(check);
+        innerContainer.add(txt);
+        this._makeBouncyButton(check, 0.9, () => {
+            setVal(!getVal());
+            check.setTexture("GJ_GameSheet03", getTex());
+            if (this._saveSettings) this._saveSettings();
+        });
+        return check;
+    };
+
+    // Texture Quality <-> UHD flag mapping:
+    //   Low    = UHD off entirely
+    //   Medium = UHD on, in-game objects off
+    //   High   = UHD on + in-game objects on
+    const QUALITIES = ["Low", "Medium", "High"];
+    const deriveQuality = () => (window.uhdTextures === false) ? 0 : (!window.uhdInGameTextures ? 1 : 2);
+    let pendingQ = deriveQuality();
+
+    // Row 1: Fullscreen, centered (like GD's Video Options)
+    const fsCheck = makeCheckbox(-110, -110, "Fullscreen", 34,
+        () => this.scale.isFullscreen,
+        () => this._toggleFullscreen()
+    );
+    // Fullscreen changes are async (and ESC can exit it), so sync the box to the
+    // real state whenever it flips; unhook when the popup is destroyed.
+    const _fsRefresh = () => { if (fsCheck.active) fsCheck.setTexture("GJ_GameSheet03", this.scale.isFullscreen ? "GJ_checkOn_001.png" : "GJ_checkOff_001.png"); };
+    this.scale.on("enterfullscreen", _fsRefresh);
+    this.scale.on("leavefullscreen", _fsRefresh);
+    this._settingsPopup.once("destroy", () => {
+        this.scale.off("enterfullscreen", _fsRefresh);
+        this.scale.off("leavefullscreen", _fsRefresh);
+    });
+
+    // Texture Quality switcher — the arrow selection is pending until Apply
+    innerContainer.add(this.add.bitmapText(0, -25, "goldFont", "Texture Quality", 38).setOrigin(0.5));
+    const qualityTxt = this.add.bitmapText(0, 40, "bigFont", QUALITIES[pendingQ], 42).setOrigin(0.5);
+    innerContainer.add(qualityTxt);
+    const _makeQualityArrow = (x, dir) => {
+        const arrow = this.add.image(x, 40, "GJ_GameSheet03", "edit_upBtn_001.png")
+            .setAngle(dir < 0 ? 270 : 90).setScale(1.15).setInteractive();
+        innerContainer.add(arrow);
+        this._makeBouncyButton(arrow, 1.15, () => {
+            pendingQ = (pendingQ + dir + QUALITIES.length) % QUALITIES.length;
+            qualityTxt.setText(QUALITIES[pendingQ]);
+        });
+    };
+    _makeQualityArrow(-170, -1);
+    _makeQualityArrow(170, 1);
+
+    // Bottom: Back / Apply buttons
+    const btnW = 220, btnH = 64, btnY = panelHeight / 2 - 60;
+    const btnBorder = this.textures.get("GJ_button01").source[0].width * 0.3;
+    const _makeBottomBtn = (x, label, action) => {
+        const btn = this.add.nineslice(x, btnY, "GJ_button01", null, btnW, btnH, btnBorder, btnBorder, btnBorder, btnBorder).setOrigin(0.5).setInteractive();
+        const txt = this.add.bitmapText(x, btnY - 5, "goldFont", label, 40).setOrigin(0.5);
+        innerContainer.add(btn);
+        innerContainer.add(txt);
+        this._makeCompositeBouncyButton(btn, [btn, txt], 1, action);
+    };
+    _makeBottomBtn(-125, "Back", () => this._closeSettingsPopup());
+    _makeBottomBtn(125, "Apply", () => {
+        // Commit the pending quality to the two UHD flags
+        window.uhdTextures = pendingQ >= 1;
+        window.uhdInGameTextures = pendingQ >= 2;
+        if (this._saveSettings) this._saveSettings();
+    });
+
+    this.tweens.add({
+        targets: innerContainer,
+        scale: 1,
+        duration: 660,
+        ease: "Elastic.Out",
+        easeParams: [1, 0.6]
     });
   }
   _saveSettings() {
@@ -3784,7 +5213,17 @@ _buildSettingsPopup() {
         solidWaveTrail: window.solidWave,
         noclipAccuracy: window.noClipAccuracy,
         hitboxesOnDeath: window.hitboxesOnDeath,
-        showEditorGlow: window.showEditorGlow
+        showEditorGlow: window.showEditorGlow,
+        createObjectIds: window.createObjectIds,
+        showObjectIds: window.showObjectIds,
+        showCPS: window.showCPS,
+        speedHack: window.speedHack,
+        macroBot: window.macroBot,
+        showEditorGlow: window.showEditorGlow,
+        showObjectGlow: window.showObjectGlow,
+        respawnTime: window.respawnTime,
+        uhdTextures: window.uhdTextures,
+        uhdInGameTextures: window.uhdInGameTextures
     };
     localStorage.setItem("gd_settings", JSON.stringify(settings));
   }
@@ -3801,7 +5240,17 @@ _buildSettingsPopup() {
         solidWaveTrail: false,
         noclipAccuracy: false,
         hitboxesOnDeath: false,
-        showEditorGlow: false
+        showEditorGlow: false,
+        createObjectIds: false,
+        showObjectIds: false,
+        showCPS: false,
+        speedHack: 1.0,
+        macroBot: false,
+        showEditorGlow: false,
+        showObjectGlow: true,
+        respawnTime: 1.0,
+        uhdTextures: true,
+        uhdInGameTextures: false
     };
 
     const data = saved ? JSON.parse(saved) : defaults;
@@ -3816,13 +5265,350 @@ _buildSettingsPopup() {
     window.solidWave = data.solidWaveTrail;
     window.noClipAccuracy = data.noclipAccuracy;
     window.hitboxesOnDeath = data.hitboxesOnDeath;
+    window.showCPS = data.showCPS;
+    window.speedHack = data.speedHack;
+    window.macroBot = data.macroBot;
     window.showEditorGlow = data.showEditorGlow;
+    window.showObjectGlow = data.showObjectGlow ?? true;
+    window.respawnTime = data.respawnTime ?? 1.0;
+    window.createObjectIds = data.createObjectIds;
+    window.showObjectIds = data.showObjectIds;
+    window.uhdTextures = data.uhdTextures ?? true;
+    window.uhdInGameTextures = data.uhdInGameTextures ?? false;
   }
-  
+  _getActiveQuests() {
+    const QUEST_DURATION = 4 * 60 * 60 * 1000;
+    const QUEST_POOL = [
+      { name: "Star Collector", desc: "Collect {n} Stars.", stat: "stars", targets: [5, 10, 15, 20], rewards: [10, 15, 20, 25] },
+      { name: "Level Master", desc: "Complete {n} Levels.", stat: "completedLevels", targets: [1, 2, 3, 5], rewards: [10, 15, 20, 30] },
+      { name: "Jump King", desc: "Jump {n} Times.", stat: "jumps", targets: [100, 200, 500, 1000], rewards: [5, 10, 15, 20] },
+      { name: "Never Give Up", desc: "Die {n} Times.", stat: "deaths", targets: [10, 25, 50, 100], rewards: [5, 10, 15, 20] },
+      { name: "Try Again", desc: "Make {n} Attempts.", stat: "attempts", targets: [10, 25, 50, 100], rewards: [5, 10, 15, 20] },
+    ];
+
+    const now = Date.now();
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem("gd_quests")); } catch(e) { saved = null; }
+    const timestamp = parseInt(localStorage.getItem("gd_questsTimestamp") || "0", 10);
+
+    if (saved && saved.length === 3 && timestamp > 0 && (now - timestamp) < QUEST_DURATION) {
+      return { quests: saved, expiresAt: timestamp + QUEST_DURATION };
+    }
+
+    const currentStats = {
+      stars: window._totalStars || 0,
+      completedLevels: window._completedLevels || 0,
+      jumps: parseInt(localStorage.getItem("gd_totalJumps") || "0", 10),
+      deaths: parseInt(localStorage.getItem("gd_totalDeaths") || "0", 10),
+      attempts: parseInt(localStorage.getItem("gd_totalAttempts") || "0", 10),
+    };
+
+    const shuffled = [...QUEST_POOL].sort(() => Math.random() - 0.5);
+    const picked = shuffled.slice(0, 3);
+    const quests = picked.map(q => {
+      const tierIdx = Math.floor(Math.random() * q.targets.length);
+      const target = q.targets[tierIdx];
+      return {
+        name: q.name,
+        desc: q.desc.replace("{n}", target),
+        stat: q.stat,
+        target: target,
+        reward: q.rewards[tierIdx],
+        startValue: currentStats[q.stat]
+      };
+    });
+
+    localStorage.setItem("gd_quests", JSON.stringify(quests));
+    localStorage.setItem("gd_questsTimestamp", String(now));
+    return { quests, expiresAt: now + QUEST_DURATION };
+  }
+  _buildQuestPopup() {
+    if (this._questPopup) return;
+    this._uhdContext = 'quest';
+    const centerX = screenWidth / 2;
+    const centerY = 320;
+    const panelWidth = 700;
+    const panelHeight = 500;
+
+    this._questPopup = this.add.container(0, 0).setScrollFactor(0).setDepth(250);
+
+    const dim = this.add.rectangle(centerX, centerY, screenWidth, screenHeight, 0, 150 / 255).setInteractive();
+    this._questPopup.add(dim);
+
+    const innerContainer = this.add.container(centerX, centerY).setScale(0);
+    this._questPopup.add(innerContainer);
+
+    const corner = 0.325 * this.textures.get("GJ_square01").source[0].width;
+    const panel = this._drawScale9(0, 0, panelWidth, panelHeight, 'GJ_square01', corner, 16777215, 1);
+    innerContainer.add(panel);
+
+    const closeBtn = this.add.image(-(panelWidth / 2) + 10, -(panelHeight / 2) + 10, 'GJ_GameSheet03', "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
+    innerContainer.add(closeBtn);
+    this._makeBouncyButton(closeBtn, 0.8, () => {
+      this._questPopup.destroy();
+      this._questPopup = null;
+    });
+
+    const title = this.add.bitmapText(0, -(panelHeight / 2) + 40, "bigFont", "Quests", 40).setOrigin(0.5);
+    innerContainer.add(title);
+
+    const { quests, expiresAt } = this._getActiveQuests();
+
+    const currentStats = {
+      stars: window._totalStars || 0,
+      completedLevels: window._completedLevels || 0,
+      jumps: parseInt(localStorage.getItem("gd_totalJumps") || "0", 10),
+      deaths: parseInt(localStorage.getItem("gd_totalDeaths") || "0", 10),
+      attempts: parseInt(localStorage.getItem("gd_totalAttempts") || "0", 10),
+    };
+
+    const rowH = 120;
+    const rowW = panelWidth - 80;
+    const startY = -100;
+
+    quests.forEach((quest, idx) => {
+      const ry = startY + idx * (rowH + 15);
+
+      const rowBg = this.add.graphics();
+      rowBg.fillStyle(0x3333AA, 0.9);
+      rowBg.fillRoundedRect(-rowW / 2, ry - rowH / 2, rowW, rowH, 12);
+      rowBg.lineStyle(2, 0x5555CC, 1);
+      rowBg.strokeRoundedRect(-rowW / 2, ry - rowH / 2, rowW, rowH, 12);
+      innerContainer.add(rowBg);
+
+      const nameText = this.add.bitmapText(-rowW / 2 + 20, ry - 35, "bigFont", quest.name, 24).setOrigin(0, 0.5);
+      innerContainer.add(nameText);
+
+      const descText = this.add.bitmapText(-rowW / 2 + 20, ry - 10, "goldFont", quest.desc, 18).setOrigin(0, 0.5);
+      innerContainer.add(descText);
+
+      const progress = Math.max(0, currentStats[quest.stat] - quest.startValue);
+      const clamped = Math.min(progress, quest.target);
+      const pct = clamped / quest.target;
+
+      const barW = 340;
+      const barH = 20;
+      const barX = -rowW / 2 + 20;
+      const barY = ry + 15;
+
+      const barBg = this.add.graphics();
+      barBg.fillStyle(0x111133, 1);
+      barBg.fillRoundedRect(barX, barY, barW, barH, barH / 2);
+      innerContainer.add(barBg);
+
+      if (pct > 0) {
+        const barFg = this.add.graphics();
+        const fillColor = clamped >= quest.target ? 0x00FF00 : 0x00AAFF;
+        barFg.fillStyle(fillColor, 1);
+        const fillW = Math.max(barH, barW * pct);
+        const rightR = pct >= 1 ? barH / 2 : 0;
+        barFg.fillRoundedRect(barX, barY, fillW, barH, { tl: barH / 2, bl: barH / 2, tr: rightR, br: rightR });
+        innerContainer.add(barFg);
+      }
+
+      const progressText = this.add.bitmapText(barX + barW / 2, barY + barH / 2, "goldFont", clamped + " / " + quest.target, 16)
+        .setOrigin(0.5);
+      innerContainer.add(progressText);
+
+      const rewardText = this.add.bitmapText(rowW / 2 - 40, ry - 10, "bigFont", quest.reward + "x", 30)
+        .setOrigin(1, 0.5);
+      innerContainer.add(rewardText);
+
+      const diamondIcon = this.add.image(rowW / 2 - 20, ry - 10, "GJ_GameSheet03", "GJ_diamondsIcon_001.png")
+        .setScale(0.8)
+        .setDepth(1.1)
+        .setAngle(90);
+        
+      innerContainer.add(diamondIcon);
+
+      if (clamped >= quest.target) {
+        nameText.setTint(0x00FF00);
+      }
+    });
+
+    const remaining = Math.max(0, expiresAt - Date.now());
+    const hours = Math.floor(remaining / 3600000);
+    const mins = Math.floor((remaining % 3600000) / 60000);
+    const timerText = this.add.bitmapText(0, panelHeight / 2 - 35, "goldFont", "New quests in: " + hours + "h " + mins + "min", 22)
+      .setOrigin(0.5);
+    innerContainer.add(timerText);
+
+    this.tweens.add({
+      targets: innerContainer,
+      scale: 1,
+      duration: 660,
+      ease: "Elastic.Out",
+      easeParams: [1, 0.6]
+    });
+  }
+  _buildMacroPopup() {
+      if (this._macroPopup) return;
+      const centerX = screenWidth / 2;
+      const centerY = 320;
+      const panelWidth = 800;
+      const panelHeight = 400;
+      this._uhdContext = 'macro';
+      this._macroPopup = this.add.container(0, 0).setScrollFactor(0).setDepth(250);
+      const dim = this.add.rectangle(centerX, centerY, screenWidth, screenHeight, 0x000000, 150 / 255).setInteractive();
+      this._macroPopup.add(dim);
+
+      const corner = 0.325 * this.textures.get("GJ_square02").source[0].width;
+      const panel = this._drawScale9(centerX, centerY, panelWidth, panelHeight, "GJ_square02", corner, 0xffffff, 1);
+      this._macroPopup.add(panel);
+
+      this._macroPopup.add(this.add.bitmapText(centerX, centerY - (panelHeight / 2) + 45, "bigFont", "Web Bot v1.0", 40).setOrigin(0.5));
+
+      if (this._macroName === undefined) {
+          this._macroName = this._macroBot?.meta?.name || null;
+      }
+      if (this._macroLoaded === undefined) {
+          this._macroLoaded = !!this._macroName || (this._macroBot && this._macroBot.inputs && this._macroBot.inputs.length > 0);
+      }
+
+      const loadedNameText = this.add.bitmapText(centerX, centerY - (panelHeight / 2) + 95, "goldFont", this._macroLoaded ? `Currently loaded "${this._macroName || 'macro'}"` : "No macro loaded", 24).setOrigin(0.5);
+      this._macroPopup.add(loadedNameText);
+
+      const optionsBtn = this.add.image(centerX, centerY - (panelHeight / 2) + 95, "GJ_GameSheet03", "GJ_optionsBtn02_001.png").setInteractive().setFlipY(true).setAngle(90).setScale(0.45);
+      this._macroPopup.add(optionsBtn);
+
+      const closeBtn = this.add.image(centerX - (panelWidth / 2) + 20, centerY - (panelHeight / 2) + 20, "GJ_GameSheet03", "GJ_closeBtn_001.png").setInteractive().setScale(0.8);
+      this._macroPopup.add(closeBtn);
+
+      this._makeBouncyButton(closeBtn, 0.8, () => {
+          this.events.off("update", this._refreshMacroButtons);
+          this._macroPopup.destroy();
+          this._macroPopup = null;
+      });
+
+      const importBtn = this.add.image(centerX - 300, centerY + 20,"importMacro").setInteractive();
+      const exportBtn = this.add.image(centerX - 150, centerY + 20, "GJ_GameSheet03", "GJ_shareBtn_001.png").setInteractive().setFlipY(true).setAngle(90).setScale(0.53);
+      const createBtn = this.add.image(centerX, centerY + 20, "GJ_GameSheet03", "GJ_plusBtn_001.png").setInteractive().setFlipY(true).setAngle(90).setScale(1.2);
+      const playbackBtn = this.add.image(centerX + 150, centerY + 20, this._macroBot?.playing ? "stopPlayback" : "playbackMacro").setInteractive().setScale(0.25);
+      const recordBtn = this.add.image(centerX + 300, centerY + 20, this._macroBot?.recording ? "stopRecord" : "recordMacro").setInteractive().setScale(0.25);
+
+      this._macroPopup.add([createBtn, importBtn, exportBtn, playbackBtn, recordBtn]);
+
+      this._refreshMacroButtons = () => {
+          const playing = !!this._macroBot?.playing;
+          const recording = !!this._macroBot?.recording;
+
+          let currentMetaName = this._macroBot?.meta?.name;
+          if (currentMetaName && currentMetaName !== this._macroName) {
+              this._macroName = currentMetaName;
+              this._macroLoaded = true;
+          }
+
+          if (this._macroLoaded) {
+              loadedNameText.setText(`Currently loaded "${this._macroName || 'macro'}"`);
+              optionsBtn.setAlpha(1).setActive(true);
+              optionsBtn.x = centerX + (loadedNameText.width / 2) + 25;
+          } else {
+              loadedNameText.setText("No macro loaded");
+              optionsBtn.setAlpha(0).setActive(false);
+          }
+
+          playbackBtn.setTexture(
+              playing
+                  ? "stopPlayback"
+                  : "playbackMacro"
+          );
+
+          recordBtn.setTexture(
+              recording
+                  ? "stopRecord"
+                  : "recordMacro"
+          );
+
+          createBtn.setAlpha((playing || recording || this._macroLoaded) ? 0.5 : 1);
+          importBtn.setAlpha((playing || recording) ? 0.5 : 1);
+          exportBtn.setAlpha((playing || recording || !this._macroLoaded) ? 0.5 : 1);
+          playbackBtn.setAlpha((recording || !this._macroLoaded) ? 0.5 : 1);
+          recordBtn.setAlpha((playing || !this._macroLoaded) ? 0.5 : 1);
+      };
+
+      this._refreshMacroButtons();
+
+      this._makeBouncyButton(optionsBtn, 0.45, () => {
+          if (!this._macroLoaded) return;
+          const renamePrompt = prompt("New name", this._macroName);
+          if (renamePrompt && renamePrompt.trim() !== "") {
+              const cleanName = renamePrompt.trim();
+              if (!this._macroBot) this._initMacroBot();
+              
+              if (!this._macroBot.meta) {
+                  this._macroBot.meta = {};
+              }
+              this._macroBot.meta.name = cleanName;
+              this._macroName = cleanName;
+              this._refreshMacroButtons();
+          }
+      });
+
+      this._makeBouncyButton(importBtn, 1, () => {
+          if (this._macroBot?.playing) return;
+          if (this._macroBot?.recording) return;
+          this._importMacroFile();
+      });
+
+      this._makeBouncyButton(exportBtn, 0.53, () => {
+          if (this._macroBot?.playing) return;
+          if (this._macroBot?.recording) return;
+          if (!this._macroLoaded) return;
+          this._exportMacroFile(this._macroName ? `${this._macroName}.wbgdr` : null);
+      });
+
+      this._makeBouncyButton(createBtn, 1.2, () => {
+          if (this._macroBot?.playing || this._macroBot?.recording || this._macroLoaded) return;
+          const name = prompt("Enter macro name");
+          if (name) {
+              if (!this._macroBot) this._initMacroBot();
+              this._macroBot.resetAll();
+              this._macroBot.meta.name = name;
+              this._macroName = name;
+              this._macroLoaded = true;
+              this._refreshMacroButtons();
+          }
+      });
+
+      this._makeBouncyButton(playbackBtn, 0.25, () => {
+          if (this._macroBot?.recording) return;
+          if (!this._macroLoaded) return;
+
+          if (this._macroBot?.playing) {
+              this._stopMacroPlayback();
+          } else {
+              if (!this._macroBot) {
+                  return;
+              }
+              const macro = this._macroBot.exportObject();
+              this._startMacroPlayback(macro);
+          }
+          this._refreshMacroButtons();
+      });
+
+      this._makeBouncyButton(recordBtn, 0.25, () => {
+          if (this._macroBot?.playing) return;
+          if (!this._macroLoaded) return;
+
+          if (this._macroBot?.recording) {
+              this._stopMacroRecording();
+          } else {
+              this._startMacroRecording({
+                  level: window.currentlevel?.[2] || "",
+                  name: this._macroName
+              });
+          }
+
+          this._refreshMacroButtons();
+      });
+
+      this.events.on("update", this._refreshMacroButtons);
+  }
   _buildInfoPopup() {
     if (this._infoPopup) {
       return;
     }
+    this._uhdContext = 'info';
     const xPos = screenWidth / 2;
     const popupHeight = 320;
     const popupWidth = 336;
@@ -3836,7 +5622,7 @@ _buildSettingsPopup() {
     const cornerRadius = this.textures.get("GJ_square02").source[0].width * 0.325;
     const popupBg = this._drawScale9(0, 0, 480, popupWidth, "GJ_square02", cornerRadius, 16777215, 1);
     bounceContainer.add(popupBg);
-    const closeBtn = this.add.image(-240 + 20, -148, "GJ_WebSheet", "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
+    const closeBtn = this.add.image(-240 + 20, -148, "GJ_GameSheet03", "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
     bounceContainer.add(closeBtn);
     this._expandHitArea(closeBtn, 2);
     this._makeBouncyButton(closeBtn, 0.8, () => this._closeInfoPopup());
@@ -3857,9 +5643,10 @@ _buildSettingsPopup() {
       { text: "Made by RobTop Games", scale: 0.8, font: "goldFont" },
       { text: "Modded by:", scale: 0.9, font: "bigFont" },
       { text: "breadbb, PinkDev, rohanis0000,", scale: 0.7, font: "goldFont" },
-      { text: "bog, AntiMatter, arbstro, aloaf", scale: 0.7, font: "goldFont" },
+      { text: "bog, Lasokar, AntiMatter,", scale: 0.7, font: "goldFont" },
+      { text: "arbstro, and aloaf", scale: 0.7, font: "goldFont" },
       { text: "Contributors:", scale: 0.9, font: "bigFont" },
-      { text: "t0nchi7 and Lasokar.", scale: 0.7, font: "goldFont" },
+      { text: "t0nchi7 and Itzar.", scale: 0.7, font: "goldFont" },
       { text: "© 2026 RobTop Games. All rights reserved.", scale: 0.4, font: "Arial", color: 0x000000 },
     ]; 
     let yPos = 0;
@@ -3939,8 +5726,9 @@ _buildSettingsPopup() {
     this.tweens.add({
       targets: bounceContainer,
       scale: { from: 0, to: 1 },
-      duration: 500,
-      ease: "Bounce.Out"
+      duration: 660,
+      ease: "Elastic.Out",
+      easeParams: [1, 0.6]
     });
   }
   _closeInfoPopup() {
@@ -4003,7 +5791,7 @@ _buildSettingsPopup() {
   this._howToPlayPopup.add(panelContainer);
   const _0x2c64c2 = this._drawScale9(0, 0, 830, 530, "GJ_square01", _0x14e46f, 16777215, 1);
   panelContainer.add(_0x2c64c2);
-  const _0x5a0f88 = this.add.image(-240 - 160, 172 - _0x4c3182 - 110, "GJ_WebSheet", "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
+  const _0x5a0f88 = this.add.image(-240 - 160, 172 - _0x4c3182 - 110, "GJ_GameSheet03", "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
   this._expandHitArea(_0x5a0f88, 2);
   this._makeBouncyButton(_0x5a0f88, 0.8, () => this._closeHowToPlayPopup());
   panelContainer.add(_0x5a0f88);
@@ -4103,8 +5891,9 @@ _buildSettingsPopup() {
   this.tweens.add({
     targets: panelContainer,
     scale: 1,
-    duration: 400,
-    ease: "Bounce.Out"
+    duration: 660,
+    ease: "Elastic.Out",
+    easeParams: [1, 0.6]
   });
 }
   _closeHowToPlayPopup() {
@@ -4117,6 +5906,7 @@ _buildSettingsPopup() {
     if (this._updateLogPopup || window.levelID) {
       return;
     }
+    this._uhdContext = 'updateLog';
     const xPos = screenWidth / 2;
     const popupHeight = 320;
     const popupWidth = 336;
@@ -4130,7 +5920,7 @@ _buildSettingsPopup() {
     const cornerRadius = this.textures.get("GJ_square02").source[0].width * 0.325;
     const popupBg = this._drawScale9(0, 0, 480, popupWidth, "GJ_square02", cornerRadius, 16777215, 1);
     bounceContainer.add(popupBg);
-    const closeBtn = this.add.image(-240 + 20, -148, "GJ_WebSheet", "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
+    const closeBtn = this.add.image(-240 + 20, -148, "GJ_GameSheet03", "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
     bounceContainer.add(closeBtn);
     this._expandHitArea(closeBtn, 2);
     this._makeBouncyButton(closeBtn, 0.8, () => this._closeUpdateLogPopup());
@@ -4154,10 +5944,10 @@ _buildSettingsPopup() {
     */
     const updateEntries = [
       { text: "Update Log", scale: 0.85, font: "goldFont" },
-      { text: "Accurate Geometry Dash logo", scale: 0.65 },
-      { text: "by zainojdaf / Society", scale: 0.6 },
+      { text: "Accurate GDWeb+ logo", scale: 0.65 },
+      { text: "Credit to Altruist for making it", scale: 0.6 },
       { text: "is this update finally out?", scale: 0.65, color: 0xaaddff },
-      { text: "- zainojdaf", scale: 0.65, color: 0xaaddff },
+      { text: "- rohanis0000", scale: 0.65, color: 0xaaddff },
     ]; 
     let yPos = 0;
     const lineItems = [];
@@ -4227,8 +6017,9 @@ _buildSettingsPopup() {
     this.tweens.add({
       targets: bounceContainer,
       scale: { from: 0, to: 1 },
-      duration: 500,
-      ease: "Bounce.Out"
+      duration: 660,
+      ease: "Elastic.Out",
+      easeParams: [1, 0.6]
     });
   }
   _closeUpdateLogPopup() {
@@ -4243,6 +6034,7 @@ _buildSettingsPopup() {
   }
   _buildNewgroundsPopup() {
     if (this._newgroundsPopup || window.levelID) return;
+    this._uhdContext = 'newgrounds';
     const xPos = screenWidth / 2;
     const centerY = screenHeight / 2;
     this._newgroundsPopup = this.add.container(0, 0).setScrollFactor(0).setDepth(1000);
@@ -4292,8 +6084,9 @@ _buildSettingsPopup() {
     this.tweens.add({
       targets: bounceContainer,
       scale: { from: 0, to: 1 },
-      duration: 500,
-      ease: "Bounce.Out"
+      duration: 660,
+      ease: "Elastic.Out",
+      easeParams: [1, 0.6]
     });
   }
   _closeNewgroundsPopup() {
@@ -4341,8 +6134,9 @@ _buildSettingsPopup() {
         this.tweens.add({
       targets: bounceContainer,
       scale: { from: 0, to: 1 },
-      duration: 500,
-      ease: "Bounce.Out"
+      duration: 660,
+      ease: "Elastic.Out",
+      easeParams: [1, 0.6]
     });
   }
   _closeFeaturedInfoPopup() {
@@ -4357,42 +6151,118 @@ _buildSettingsPopup() {
     const _0x960250 = _0x46ea45 * (_0x37180a - 1) / 2;
     const _0x3f88a1 = _0x43b461 * (_0x37180a - 1) / 2;
     _0x122213.input.hitArea.setTo(-_0x960250, -_0x3f88a1, _0x46ea45 + _0x960250 * 2, _0x43b461 + _0x3f88a1 * 2);
+    // The UHD hit-zone experiment (localStorage.uhdHideOldTextures) redirects input
+    // to a same-sized companion Zone once setInteractive() has been called — mirror
+    // the same expansion onto it, or every _expandHitArea call site (there are 15+)
+    // silently stops doing anything once that zone takes over.
+    if (_0x122213._uhdHitZone && _0x122213._uhdHitZone.input) {
+      _0x122213._uhdHitZone.input.hitArea.setTo(-_0x960250, -_0x3f88a1, _0x46ea45 + _0x960250 * 2, _0x43b461 + _0x3f88a1 * 2);
+    }
   }
   _makeBouncyButton(textureX, _0x57b645, _0x2f13d0, _0xda0c21) {
-    const _0x396ca0 = _0x57b645 * 1.26;
-    textureX.on("pointerdown", () => {
-      if (!_0xda0c21 || !!_0xda0c21()) {
-        textureX._pressed = true;
-        this.tweens.killTweensOf(textureX, "scale");
+    textureX._bouncyBaseScale = _0x57b645;
+    const getBouncyVisualTargets = () => {
+      const configured = Array.isArray(textureX._bouncyVisualTargets) && textureX._bouncyVisualTargets.length
+        ? textureX._bouncyVisualTargets
+        : [textureX._bouncyVisualTarget || textureX];
+      return configured
+        .map(entry => {
+          const target = entry && entry.target ? entry.target : entry;
+          if (!target || typeof target.setScale !== "function") return null;
+          const baseScale =
+            (entry && typeof entry.getBaseScale === "function" ? entry.getBaseScale() : undefined) ??
+            (entry && entry.baseScale !== undefined ? entry.baseScale : undefined) ??
+            target._bouncyBaseScale ??
+            textureX._bouncyBaseScale ??
+            _0x57b645;
+          const baseScaleX =
+            (entry && typeof entry.getBaseScaleX === "function" ? entry.getBaseScaleX() : undefined) ??
+            (entry && entry.baseScaleX !== undefined ? entry.baseScaleX : undefined) ??
+            baseScale;
+          const baseScaleY =
+            (entry && typeof entry.getBaseScaleY === "function" ? entry.getBaseScaleY() : undefined) ??
+            (entry && entry.baseScaleY !== undefined ? entry.baseScaleY : undefined) ??
+            baseScale;
+          return { target, baseScaleX, baseScaleY };
+        })
+        .filter(Boolean);
+    };
+    const tweenBouncyTargets = (scaleMultiplier, duration) => {
+      for (const entry of getBouncyVisualTargets()) {
+        this.tweens.killTweensOf(entry.target);
         this.tweens.add({
-          targets: textureX,
-          scale: _0x396ca0,
-          duration: 300,
+          targets: entry.target,
+          scaleX: entry.baseScaleX * scaleMultiplier,
+          scaleY: entry.baseScaleY * scaleMultiplier,
+          duration,
           ease: "Bounce.Out"
         });
       }
+    };
+    const resetBouncyTargets = (instant = false) => {
+      for (const entry of getBouncyVisualTargets()) {
+        this.tweens.killTweensOf(entry.target);
+
+        if (instant) {
+          entry.target.setScale(entry.baseScaleX, entry.baseScaleY);
+        } else {
+          this.tweens.add({
+            targets: entry.target,
+            scaleX: entry.baseScaleX,
+            scaleY: entry.baseScaleY,
+            duration: 400,
+            ease: "Bounce.Out"
+          });
+        }
+      }
+    };
+    textureX.on("pointerdown", () => {
+      if (!_0xda0c21 || !!_0xda0c21()) {
+        textureX._pressed = true;
+        tweenBouncyTargets(1.26, 300);
+      }
     });
-    textureX.on("pointerout", (pointer) => {
+    textureX.on("pointerout", () => {
       if (textureX._pressed) {
         textureX._pressed = false;
-        this.tweens.killTweensOf(textureX, "scale");
-        this.tweens.add({
-          targets: textureX,
-          scale: _0x57b645,
-          duration: 400,
-          ease: "Bounce.Out"
-        });
+        resetBouncyTargets(false);
       }
     });
     textureX.on("pointerup", () => {
       if (textureX._pressed) {
         textureX._pressed = false;
-        this.tweens.killTweensOf(textureX);
-        textureX.setScale(_0x57b645);
-        _0x2f13d0();
+        resetBouncyTargets(true);
+        _0x2f13d0?.();
+      }
+    });
+    textureX.on("pointerupoutside", () => {
+      if (textureX._pressed) {
+        textureX._pressed = false;
+        resetBouncyTargets(false);
       }
     });
     return textureX;
+  }
+  _makeCompositeBouncyButton(trigger, visualTargets, baseScale, callback, condition) {
+    trigger._bouncyVisualTargets = (Array.isArray(visualTargets) ? visualTargets : [visualTargets])
+      .filter(Boolean)
+      .map(entry => {
+        const target = entry && entry.target ? entry.target : entry;
+        const currentScaleX = target?.scaleX ?? baseScale;
+        const currentScaleY = target?.scaleY ?? baseScale;
+        const entryBase = entry && entry.baseScale !== undefined ? entry.baseScale : undefined;
+
+        return {
+          target,
+          baseScaleX: entry && entry.baseScaleX !== undefined ? entry.baseScaleX : (entryBase ?? currentScaleX),
+          baseScaleY: entry && entry.baseScaleY !== undefined ? entry.baseScaleY : (entryBase ?? currentScaleY),
+          getBaseScale: entry && entry.getBaseScale,
+          getBaseScaleX: entry && entry.getBaseScaleX,
+          getBaseScaleY: entry && entry.getBaseScaleY
+        };
+      });
+
+    return this._makeBouncyButton(trigger, baseScale, callback, condition);
   }
   _toggleFullscreen() {
     if (this.scale.isFullscreen) {
@@ -4659,18 +6529,6 @@ _buildSettingsPopup() {
     }
     this._closeInfoPopup();
     this._closeUpdateLogPopup();
-    if (this._tryMeImg) {
-      this.tweens.add({
-        targets: this._tryMeImg,
-        y: -this._tryMeImg.height,
-        duration: 300,
-        ease: "Quad.In",
-        onComplete: () => {
-          this._tryMeImg.destroy();
-          this._tryMeImg = null;
-        }
-      });
-    }
     if (this._downloadBtns) {
       for (const _0xaa3a95 of this._downloadBtns) {
         this.tweens.killTweensOf(_0xaa3a95);
@@ -4710,6 +6568,7 @@ _buildSettingsPopup() {
     }
 
     if (window.isEditor) {
+        this._audio.stopMusic();
         this._cameraX = 0;
         this._cameraY = 0;
         this._playerWorldX = 0;
@@ -4763,6 +6622,8 @@ _buildSettingsPopup() {
     this._attemptsLabel.setText("Attempt " + this._levelAttempts);
     this._attemptsLabel.setVisible(true);
     this._positionAttemptsLabel();
+    this._coinsCollected = 0;
+    this._coinTotal = this._level._coinSprites.length;
     let gamemode = parseInt(window.settingsMap["kA2"] || "0");
     if (gamemode == 1) {
       this._player.enterShipMode();
@@ -4774,8 +6635,10 @@ _buildSettingsPopup() {
     } else if (gamemode == 4) {
       this._player.enterWaveMode();
     }
+
+    this._applyLevelStartOptions();
   }
-  _pushButton() {
+  _pushButton(ignoreMacro = false) {
     const objectsUnderPointer = this.input.manager.hitTest(
       this.input.activePointer, 
       this._startPosGui.list,
@@ -4792,6 +6655,12 @@ _buildSettingsPopup() {
       this._startGame();
       return;
     }
+
+    if (!cancelInput) {
+      if (!this._clickHistory) this._clickHistory = [];
+      this._clickHistory.push(this.time.now);
+    }
+
     if (!this._slideIn && !this._state.isDead && !cancelInput) {
       this._state.upKeyDown = true;
       this._state.upKeyPressed = true;
@@ -4808,11 +6677,76 @@ _buildSettingsPopup() {
         localStorage.setItem("gd_totalJumps", this._totalJumps);
       }
     }
+
+    if (!ignoreMacro && this._macroBot) {
+      this._macroBot.recordEdge(true, this._physicsFrame);
+    }
   }
-  _releaseButton() {
+  _releaseButton(ignoreMacro = false) {
     this._state.upKeyDown = false;
     this._state.upKeyPressed = false;
     this._state.queuedHold = false;
+    if (!ignoreMacro && this._macroBot) {
+      this._macroBot.recordEdge(false, this._physicsFrame);
+    }
+  }
+  _initMacroBot() {
+    this._macroBot = new MacroBot(this);
+    window.macroBot = this._macroBot;
+  }
+  _startMacroRecording(meta = {}) {
+    if (!this._macroBot) this._initMacroBot();
+    this._macroBot.startRecording({
+      level: window.currentlevel?.[2] || "",
+      ...meta
+    });
+  }
+  _stopMacroRecording() {
+    if (!this._macroBot) return null;
+    return this._macroBot.stopRecording();
+  }
+  _startMacroPlayback(macroData) {
+    console.log(macroData);
+    if (!this._macroBot) this._initMacroBot();
+    this._macroBot.startPlayback(macroData);
+  }
+  _stopMacroPlayback() {
+    if (this._macroBot) this._macroBot.stopPlayback();
+  }
+  _exportMacroFile(filename = null) {
+    if (!this._macroBot) return;
+    const safeName = (filename || `${window.currentlevel?.[2] || "macro"}.gdr`)
+      .replace(/[^\w.\-]+/g, "_");
+    this._macroBot.download(safeName);
+  }
+  _importMacroFile() {
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".wbgdr";
+
+    fileInput.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      try {
+        if (!this._macroBot) this._initMacroBot();
+        
+        const macroData = await this._macroBot.importFile(file);
+        this._macroBot.inputs = Array.isArray(macroData.inputs) ? macroData.inputs.slice() : [];
+        const fallback = file.name.replace(/\.[^/.]+$/, "");
+        const macroName = macroData.meta?.name || fallback;
+
+        this._macroBot.meta = macroData.meta || this._macroBot.meta;
+        this._macroBot.meta.name = macroName;
+
+        this._macroName = macroName;
+        this._macroLoaded = true;
+      } catch (err) {
+        alert("Failed to import: " + err.message);
+      }
+    };
+
+    fileInput.click();
   }
   _positionMenuItems() {
     const _0x1e5db8 = screenWidth / 2;
@@ -4824,9 +6758,6 @@ _buildSettingsPopup() {
     }
     if (this._copyrightText) {
       this._copyrightText.x = screenWidth - 20;
-    }
-    if (this._tryMeImg) {
-      this._tryMeImg.x = _0x1e5db8 + 175;
     }
     if (this._menuGlitter) {
       this._menuGlitter.x = _0x1e5db8;
@@ -4871,8 +6802,10 @@ _buildSettingsPopup() {
     if (this._socialIcons && this._socialIcons.length > 0) {
       const _iconSpacing = 52;
       const _originX = 65;
-      const _originY = 530;
-      const _layout = [{row:0,col:0},{row:0,col:1},{row:0,col:2},{row:0,col:3},{row:1,col:3}];
+      const _originY = 478;
+      const _layout = [{row:0,col:0},{row:0,col:1},{row:0,col:2},{row:0,col:3},
+                       {row:1,col:0},{row:1,col:1},{row:1,col:2},{row:1,col:3},
+                       {row:2,col:0},{row:2,col:1},{row:2,col:2},{row:2,col:3},{row:2,col:4}];
       this._socialIcons.forEach((icon, i) => {
         icon.x = _originX + _layout[i].col * _iconSpacing;
         icon.y = _originY + _layout[i].row * _iconSpacing;
@@ -4901,6 +6834,7 @@ _buildSettingsPopup() {
     this._endCameraOverride = false;
     this._endCamTween = null;
     this._spaceWasDown = false;
+    this._physicsFrame = 0;
   }
   _restartLevel() {
     this._attempts++;
@@ -4956,6 +6890,8 @@ _buildSettingsPopup() {
     this._level.resetEnterEffectTriggers();
     this._level.resetMoveTriggers();
     this._level.resetVisibility();
+    this._level._updateGlowVisibility();
+    this._coinsCollected = 0;
     if (this._orbGfx) { this._orbGfx.clear(); }
     this._colorManager.reset();
     this._player.noclipStats.totalFrames = 0;
@@ -4964,8 +6900,9 @@ _buildSettingsPopup() {
 
     const musicOffset = this._getStartPosMusicOffset();
     const startPositions = this._level.getStartPositions();
+    const activeStartPos = this._startPosIndex !== -1 && !!startPositions[this._startPosIndex];
 
-    if (this._startPosIndex !== -1 && startPositions[this._startPosIndex]) {
+    if (activeStartPos) {
       const pos = startPositions[this._startPosIndex];
 
       this._playerWorldX = pos.x;
@@ -5009,22 +6946,33 @@ _buildSettingsPopup() {
     this._attemptsLabel.setText("Attempt " + this._levelAttempts);
     this._attemptsLabel.setVisible(true);
     this._positionAttemptsLabel();
-    let gamemode = parseInt(window.settingsMap["kA2"] || "0");
-    if (gamemode == 1) {
-      this._player.enterShipMode();
-    } else if (gamemode == 2) {
-      this._state.y = 30;
-      this._player.enterBallMode({ y: 30 });
-    } else if (gamemode == 3) {
-      this._player.enterUfoMode();
-    } else if (gamemode == 4) {
-      this._player.enterWaveMode();
-    } else if (gamemode == 6) {
-      this._player.enterSpiderMode();
+    if (!activeStartPos) {
+      let gamemode = parseInt(window.settingsMap["kA2"] || "0");
+      if (gamemode == 1) {
+        this._player.enterShipMode();
+      } else if (gamemode == 2) {
+        this._state.y = 30;
+        this._player.enterBallMode({ y: 30 });
+      } else if (gamemode == 3) {
+        this._player.enterUfoMode();
+      } else if (gamemode == 4) {
+        this._player.enterWaveMode();
+      } else if (gamemode == 6) {
+        this._player.enterSpiderMode();
+      }
+
+      this._applyLevelStartOptions();
     }
 
     if (this._player && this._player._hitboxTrail) {
       this._player._hitboxTrail = [];
+    }
+
+    if (this._macroBot?.recording == true){
+      this._macroBot?.clearRecording();
+    }
+    if (this._macroBot?.playing == true){
+      this._macroBot?.clearPlayback();
     }
   }
   _getStartPosMusicOffset(){
@@ -5083,11 +7031,11 @@ _buildSettingsPopup() {
     this._state.isSpider = false;
     this._state.isBird = false;
     if (checkpoint.isFlying) {
-      this._player.enterShipMode();
+      this._player.enterShipMode(null, true); // dont mess with y velocity if ur loading a checkpoint
     } else if (checkpoint.isBall) {
       this._player.enterBallMode();
     } else if (checkpoint.isUfo) {
-      this._player.enterUfoMode();
+      this._player.enterUfoMode(null, true); // dont mess with y velocity if ur loading a checkpoint
     } else if (checkpoint.isWave) {
       this._player.enterWaveMode();
     } else if (checkpoint.isSpider) {
@@ -5109,6 +7057,8 @@ _buildSettingsPopup() {
     this._state.isUfo = checkpoint.isUfo;
     this._state.isSpider = checkpoint.isSpider;
     this._state.isBird = checkpoint.isBird;
+    this._state.ignorePortals = true;
+    this._state2.ignorePortals = true;
     this._level.resetGroundTiles(this._cameraX);
     this._level.resetObjects();
     this._level._flyCeilingY = checkpoint.flyCeilingY;
@@ -5158,6 +7108,7 @@ _buildSettingsPopup() {
     this._level.topContainer.x = -this._cameraX;
     this._level.topContainer.y = this._cameraY;
     this._level.updateVisibility(this._cameraX);
+    this._level.updateObjectDebugIds();
     this._updateBackground();
     this._applyMirrorEffect();
     if (!this._audio.musicPlaying) {
@@ -5166,6 +7117,19 @@ _buildSettingsPopup() {
 
     if (this._player && this._player._hitboxTrail) {
       this._player._hitboxTrail = [];
+    }
+
+    this._physicsFrame = checkpoint.physicsFrame;
+    if (this._macroBot?.recording == true){
+      this._macroBot?.rollbackRecording(this._physicsFrame);
+      if (this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown || this._lKey.isDown || this._enterKey.isDown){
+        this._macroBot.recordEdge(true, this._physicsFrame);
+      } else {
+        this._macroBot.recordEdge(false, this._physicsFrame);
+      }
+    }
+    if (this._macroBot?.playing == true){
+      this._macroBot?.rollbackPlayback(this._physicsFrame);
     }
   }
   _onFullscreenChange(_0x310c5b) {
@@ -5205,6 +7169,7 @@ _buildSettingsPopup() {
       this._level.shiftGroundTiles(this._cameraX - _0x56287b);
       this._level.updateGroundTiles(this._cameraY);
       this._level.updateVisibility(this._cameraX);
+      this._level.updateObjectDebugIds();
       this._level.applyEnterEffects(this._cameraX);
       const _0xde8a1a = this._playerWorldX - this._cameraX;
       this._player.syncSprites(this._cameraX, this._cameraY, 0, this._getMirrorXOffset(_0xde8a1a));
@@ -5252,7 +7217,8 @@ _buildSettingsPopup() {
     }
   }
   _quantizeDelta(_0x654f39) {
-    let _0x578d1b = _0x654f39 / 1000 + this._deltaBuffer;
+    const speed = window.speedHack || 1;
+    let _0x578d1b = (_0x654f39 * speed) / 1000 + this._deltaBuffer;
     let _0x53e02e = Math.round(_0x578d1b / u);
     if (_0x53e02e < 0) {
       _0x53e02e = 0;
@@ -5264,8 +7230,236 @@ _buildSettingsPopup() {
     this._deltaBuffer = _0x578d1b - _0xd8019e;
     return _0xd8019e * 60;
   }
+  // Per-frame sync: position every UHD DOM img overlay over its Phaser counterpart.
+  // Runs on the scene's POST_UPDATE event (registered in create) — i.e. AFTER update()
+  // has moved the level containers / camera for this frame. Running it inside update()
+  // (before the camera code) made every overlay trail the canvas by exactly one frame,
+  // which reads as severe motion blur / ghosting while scrolling.
+  _syncUhdOverlays = () => {
+    if (this._uhdCont && this._uhdMap && this._uhdMap.size > 0) {
+      const _cv = this.game.canvas;
+      const _cr = _cv.getBoundingClientRect();
+      // Only re-set container position on resize (avoids layout thrash every frame)
+      const _pos = _cr.left + ',' + _cr.top + ',' + _cr.width + ',' + _cr.height;
+      if (this._uhdContPos !== _pos) {
+        const _css = 'position:fixed;pointer-events:none;overflow:hidden;left:' + _cr.left + 'px;top:' + _cr.top + 'px;width:' + _cr.width + 'px;height:' + _cr.height + 'px;';
+        this._uhdCont.style.cssText = _css + 'z-index:499;';
+        this._uhdFadeDiv.style.cssText = _css + 'z-index:500;background:#000;opacity:' + (this._uhdFadeDiv._op || '0') + ';';
+        if (this._uhdFlashDiv) this._uhdFlashDiv.style.cssText = _css + 'z-index:9000;background:#f00;opacity:' + (this._uhdFlashDiv._op || '0') + ';';
+        this._uhdContPos = _pos;
+      }
+      const _sx = _cr.width / screenWidth;
+      const _sy = _cr.height / screenHeight;
+      // Black fade div sits above UHD imgs and mirrors the Phaser depth-200 fade graphics
+      let _fadeCover = 0;
+      for (const _fc of this.children.list) {
+        if (_fc.depth === 200 && _fc.type === 'Graphics' && _fc.alpha > _fadeCover && _fc.scrollFactorX === 0) {
+          _fadeCover = _fc.alpha;
+          if (_fadeCover >= 1) break;
+        }
+      }
+      const _camA = this.cameras.main.alpha;
+      if (_camA < 1) _fadeCover = Math.max(_fadeCover, 1 - _camA);
+      const _fadeOp = _fadeCover.toFixed(2);
+      if (this._uhdFadeDiv._op !== _fadeOp) { this._uhdFadeDiv.style.opacity = _fadeOp; this._uhdFadeDiv._op = _fadeOp; }
+      // Noclip death flash: mirror the canvas rectangle's alpha above everything
+      if (this._uhdFlashDiv) {
+        const _flashOp = (this.noclipFlash && this.noclipFlash.alpha > 0) ? this.noclipFlash.alpha.toFixed(2) : '0';
+        if (this._uhdFlashDiv._op !== _flashOp) { this._uhdFlashDiv.style.opacity = _flashOp; this._uhdFlashDiv._op = _flashOp; }
+      }
+      // Priority-ordered: most-nested overlay first. Only its group's DOM imgs are shown.
+      const _effectiveCtx =
+        this._editorColorPickerPopup                      ? 'editorColorPicker' :
+        this._editorHorizontalOptionPopup                 ? 'editorHorizontalOption' :
+        this._editorStartOptionsPopup                     ? 'editorStartOptions' :
+        this._editorLevelSettingsPopup                    ? 'editorSettings' :
+        (this._editorMenuContainer && this._editorMenuContainer.visible) ? 'editorPause' :
+        this._nongPopupObjs                               ? 'nong' :
+        this._levelInfoContainer                          ? 'levelInfo' :
+        this._questPopup                                  ? 'quest' :
+        this._macroPopup                                  ? 'macro' :
+        (this._settingsLayerOverlay || this._settingsPopup) ? 'settings' :
+        this._achLayerOverlay                             ? 'achLayer' :
+        this._statsLayerOverlay                           ? 'stats' :
+        this._iconOverlay                                 ? 'icon' :
+        this._onlineLevelsOverlay                         ? 'online' :
+        this._searchResultsOpen                           ? 'searchResults' :
+        this._searchOverlay                               ? 'search' :
+        this._savedOverlay                                ? 'saved' :
+        this._newgroundsPopup                             ? 'newgrounds' :
+        this._infoPopup                                   ? 'info' :
+        this._updateLogPopup                              ? 'updateLog' :
+        this._levelViewOverlay                            ? 'levelView' :
+        this._creatorOverlay                              ? 'creator' :
+        this._editorOverlay                               ? 'editor' :
+        this._levelSelectOverlay                          ? 'levelSelect' :
+        this._pauseContainer                              ? 'pause' :
+        null;
+      // Graphics settings: master UHD switch (default on) and in-game object UHD
+      // (default off). Checked live each frame so the toggles apply instantly.
+      const _uhdOn = window.uhdTextures !== false;
+      const _uhdObjOn = _uhdOn && !!window.uhdInGameTextures;
+      const _uhdHideOld = localStorage.getItem('uhdHideOldTextures') !== '0';
+      for (const [go, entry] of this._uhdMap) {
+        if (!go.active) {
+          if (entry.img) entry.img.remove();
+          if (entry.hitZone) entry.hitZone.destroy();
+          this._uhdMap.delete(go);
+          continue;
+        }
+        // Fast path for culled level objects — the overwhelmingly common case in a long
+        // level. No DOM img exists and the section container is hidden: two reads, skip.
+        if (entry.obj && !entry.img) {
+          if (!_uhdObjOn) continue;
+          const _pc = go.parentContainer;
+          if (!go.visible || (_pc && !_pc.visible)) continue;
+        }
+        let _parVis = true; { let _chk = go.parentContainer; while (_chk) { if (!_chk.visible) { _parVis = false; break; } _chk = _chk.parentContainer; } }
+        // Keep the companion hit-zone (see the setInteractive patch above) tracking
+        // this sprite's current world transform and depth every frame, and mirror
+        // the game's own intended visibility (not the UHD-hiding state below, which
+        // is purely cosmetic) into whether it's actually clickable.
+        if (entry.hitZone) {
+          const _hz = entry.hitZone;
+          // Keep it in the same container as its sprite (image.setInteractive() often
+          // runs before container.add(image) — e.g. chained on the same line — so the
+          // zone can easily be created before that reparenting happens). Once actually
+          // parented alongside it, position/scale/rotation are plain local coordinates
+          // and Phaser's own container transform/depth handling does the rest, instead
+          // of hand-rolling a world-space walk that only covered position/scale.
+          if (_hz.parentContainer !== go.parentContainer) {
+            if (_hz.parentContainer) _hz.parentContainer.remove(_hz);
+            if (go.parentContainer) go.parentContainer.add(_hz);
+            else this.sys.displayList.add(_hz);
+          }
+          _hz.setPosition(go.x, go.y).setScale(go.scaleX, go.scaleY).setRotation(go.rotation);
+          _hz.setScrollFactor(go.scrollFactorX, go.scrollFactorY);
+          if (_hz.depth !== go.depth) _hz.setDepth(go.depth);
+          const _hzActive = go._uhdWantsInteractive && go.visible && _parVis;
+          if (_hz.input && _hz.input.enabled !== _hzActive) {
+            if (_hzActive) _hz.setInteractive(); else _hz.disableInteractive();
+          }
+        }
+        // Object-sheet sprites with a color tint (not white/black) can't be replicated
+        // by a DOM img; nor can any sprite with a non-normal blend mode (e.g. the
+        // additive spider dash streak from GJ_GameSheet04) — hide the overlay so the
+        // canvas sprite shows through.
+        const _objUnsupported = (entry.obj && go.tintTopLeft !== 0xffffff && go.tintTopLeft !== 0) || (go.blendMode && go.blendMode !== 0);
+        const vis = go.visible && _parVis && entry.group === _effectiveCtx && !_objUnsupported && (entry.obj ? _uhdObjOn : _uhdOn);
+        if (!vis) {
+          if (entry.obj) {
+            // Level objects release their DOM node entirely while off screen; the
+            // browser's image cache makes re-creation on approach cheap.
+            if (entry.img) { entry.img.remove(); entry.img = null; entry._vis = false; entry._t = null; entry._al = ''; entry._op = ''; entry._sized = false; }
+            continue;
+          }
+          // Un-hide the canvas sprite (see below) now that its overlay isn't showing.
+          if (entry._forceHidden) { go.alpha = entry._authoredAlpha != null ? entry._authoredAlpha : 1; entry._forceHidden = false; }
+          if (entry._vis !== false) { entry.img.style.display = 'none'; entry._vis = false; }
+          continue;
+        }
+        if (_uhdHideOld && !entry.obj && (entry.hitZone || !go.input)) {
+          // Purely decorative sprites (corner art, backgrounds, etc.) were never made
+          // interactive at all, so there's no hitbox to protect — safe to hide
+          // outright. Interactive ones only get hidden once their own zone (see the
+          // setInteractive patch above) exists to keep handling clicks for them.
+          // The real alpha is stashed so the dim/disabled-look filter below still
+          // reflects what the game actually intended, not our forced 0.
+          if (!entry._forceHidden) { entry._authoredAlpha = go.alpha; entry._forceHidden = true; }
+          if (go.alpha !== 0) go.alpha = 0;
+        }
+        if (!entry.img) {
+          const _di = document.createElement('img');
+          _di.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;object-fit:' + (entry.fit || 'contain') + ';';
+          _di.onerror = () => { _di.style.display = 'none'; };
+          _di.src = entry.src;
+          this._uhdCont.appendChild(_di);
+          entry.img = _di;
+          entry._vis = null; entry._t = null; entry._al = ''; entry._op = ''; entry._sized = false;
+        }
+        const _isSideArt = go.frame && go.frame.name === 'GJ_sideArt_001.png';
+        const _uhdScale = entry.uhdScale || 1;
+        const dw = go.width * _sx * _uhdScale;
+        const dh = go.height * _sy * _uhdScale;
+        const ox = go.originX != null ? go.originX : 0.5;
+        const oy = go.originY != null ? go.originY : 0.5;
+        if (!entry._sized) {
+          entry.img.style.width = dw.toFixed(1) + 'px';
+          entry.img.style.height = dh.toFixed(1) + 'px';
+          entry.img.style.transformOrigin = _isSideArt ? '0% 0%' : ((ox * 100).toFixed(0) + '% ' + (oy * 100).toFixed(0) + '%');
+          entry._sized = true;
+        }
+        if (entry._vis !== true) { entry.img.style.display = ''; entry._vis = true; }
+        let al = '';
+        if (entry.obj) {
+          // World objects: alpha is a real gameplay fade, not a disabled-button look.
+          const op = go.alpha < 1 ? go.alpha.toFixed(2) : '';
+          if (entry._op !== op) { entry.img.style.opacity = op; entry._op = op; }
+        } else if ((entry._forceHidden ? entry._authoredAlpha : go.alpha) < 1) {
+          al = 'grayscale(1) brightness(0.55)';
+        }
+        // Grey-tinted sprites (sawblades use setTint(0); dimmed/unselected UI icons
+        // use a mid-grey tint) — a neutral multiply tint is equivalent to a CSS
+        // brightness() scale by the tint's channel value, with hue/saturation
+        // untouched (unlike grayscale()). Only exact/near-neutral tints are
+        // approximated this way; colored tints aren't used on non-obj UHD sprites.
+        if (go.tintTopLeft !== 0xffffff) {
+          const _tintR = (go.tintTopLeft >> 16) & 0xff;
+          al += (al ? ' ' : '') + 'brightness(' + (_tintR / 255).toFixed(2) + ')';
+        }
+        if (entry._al !== al) { entry.img.style.filter = al; entry._al = al; }
+        let _wx = go.x, _wy = go.y, _ws = go.scaleX, _wsY = go.scaleY;
+        { let _wp = go.parentContainer; while (_wp) { _wx = _wp.x + _wx * (_wp.scaleX || 1); _wy = _wp.y + _wy * (_wp.scaleY || 1); _ws *= (_wp.scaleX || 1); _wsY *= (_wp.scaleY || 1); _wp = _wp.parentContainer; } }
+        let t;
+        if (_isSideArt) {
+          const _sFX = (_wx * _sx < _cr.width * 0.5 ? 1 : -1) * _ws;
+          const _sFY = (_wy * _sy < _cr.height * 0.5 ? -1 : 1) * _ws;
+          const _cX = (_sFX > 0 ? 0 : _wx * _sx).toFixed(1);
+          const _cY = (_sFY > 0 ? _wy * _sy - dh : dh).toFixed(1);
+          t = 'translate(' + _cX + 'px,' + _cY + 'px) scale(' + _sFX.toFixed(3) + ',' + _sFY.toFixed(3) + ')';
+        } else {
+          const _isAtlasComp = go.frame && go.frame.rotated && go.flipX && Math.abs(go.rotation + Math.PI * 0.5) < 0.01;
+          if (_isAtlasComp) {
+            const _fr = go.frame;
+            const _corX = (_fr.realWidth - _fr.realHeight + (_fr.y - _fr.x) * 2 + _fr.height - _fr.width) * 0.5;
+            _wx += _corX; _wy -= _corX;
+          }
+          const _isAtlasRotated = go.frame && go.frame.rotated;
+          // CSS scale(-1) mirrors around the origin point, which relocates an off-center
+          // box's footprint to the other side of that point (it does NOT mirror in place
+          // like Phaser's flip, which just reverses texture sampling within a fixed quad).
+          // Compensate by shifting translate so the footprint stays where Phaser puts it.
+          const _flipCorX = (!_isAtlasRotated && go.flipX) ? dw * _ws * (1 - 2 * ox) : 0;
+          const _flipCorY = (!_isAtlasRotated && go.flipY) ? dh * _wsY * (1 - 2 * oy) : 0;
+          const _uhdOffX = entry.uhdOffset ? entry.uhdOffset.x * _sx : 0;
+          const _uhdOffY = entry.uhdOffset ? entry.uhdOffset.y * _sy : 0;
+          const tx = (_wx * _sx - dw * ox + _flipCorX + _uhdOffX).toFixed(1);
+          const ty = (_wy * _sy - dh * oy + _flipCorY + _uhdOffY).toFixed(1);
+          const _cFX = (!_isAtlasRotated && go.flipX) ? -_ws : _ws;
+          const _cFY = (!_isAtlasRotated && go.flipY) ? -_wsY : _wsY;
+          const _cRot = _isAtlasRotated ? (entry.uhdRot != null ? go.rotation + entry.uhdRot : 0) : go.rotation;
+          if (_cRot === 0 && _cFX === _cFY) {
+            t = 'translate(' + tx + 'px,' + ty + 'px) scale(' + _cFX.toFixed(3) + ')';
+          } else {
+            t = 'translate(' + tx + 'px,' + ty + 'px)'
+              + (_cRot !== 0 ? ' rotate(' + _cRot.toFixed(4) + 'rad)' : '')
+              + ' scale(' + _cFX.toFixed(3) + ',' + _cFY.toFixed(3) + ')';
+          }
+        }
+        if (entry._t !== t) { entry.img.style.transform = t; entry._t = t; }
+      }
+    }
+  };
   update(_0x54fa47, deltaTime) {
+    this._uhdContext = null; // reset between frames so only current overlay's add.image calls get tagged
     if (window.isEditor) {
+        if (this._editorPlaytestActive && !this._editorPlaytestPaused) {
+            this._updateEditorPlaytest(deltaTime);
+            this._updateEditorGrid();
+            this._updateEditorTimeline();
+            return;
+        }
+
         if (window.isEditorPause) return;
         const pointer = this.input.activePointer;
         this._hitObjects = this.input.hitTestPointer(pointer);
@@ -5295,6 +7489,10 @@ _buildSettingsPopup() {
             }
         }
         this._updateEditorTimeline();
+        if (this._editorPlaytestActive && this._editorPlaytestPaused) {
+            this._refreshEditorPlaytestGlowVisibility();
+            this._syncEditorPlaytestPlayerVisual(deltaTime / 1000);
+        }
         return;
     }
     let rawPercent = (this._playerWorldX / this._level.endXPos) * 100;
@@ -5321,6 +7519,26 @@ _buildSettingsPopup() {
     this._accuracyIndicator.setText(`${this._player.noclipStats.accuracy.toFixed(2)}%`);
     this._deathsIndicator.setText(`${this._player.noclipStats.deaths} Deaths`);
 
+    this._cpsIndicator.setVisible(window.showCPS && !this._menuActive);
+    if (this._clickHistory && this._clickHistory.length > 0) {
+      this._clickHistory = this._clickHistory.filter(timestamp => this.time.now - timestamp <= 1000);
+      this._cpsIndicator.setText(`${this._clickHistory.length} CPS`);
+    } else {
+      this._cpsIndicator.setText("0 CPS");
+    }
+    if (this._state.upKeyDown){
+      this._cpsIndicator.setTint(0x00ff00);
+    } else{
+      this._cpsIndicator.setTint(0xffffff);
+    }
+    this._cpsIndicator.setPosition(10, 10 + (window.noClip * 20) + (window.noClip && window.noClipAccuracy * 40));
+
+    this._bottedIndicator.setVisible(this._macroBot?.playing);
+    this._bottedIndicator.setPosition(10, 10 + (window.noClip * 20) + (window.noClip && window.noClipAccuracy * 40) + (window.showCPS * 20));
+    if (this._macroBtn){
+      this._macroBtn.setVisible(window.macroBot);
+    }
+
     this._fpsAccum += deltaTime;
     this._fpsFrames++;
     if (this._fpsAccum >= 250) {
@@ -5329,7 +7547,7 @@ _buildSettingsPopup() {
       this._fpsFrames = 0;
     }
     if (this._paused) {
-      if (!this._updateLogPopup && (this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown || this._lKey.isDown) && !this._spaceWasDown && !this._settingsPopup) {
+      if (!this._updateLogPopup && (this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown || this._lKey.isDown || this._enterKey.isDown) && !this._spaceWasDown && !this._settingsPopup) {
         setTimeout(() => {
           this._resumeGame();
         }, 75);
@@ -5341,7 +7559,7 @@ _buildSettingsPopup() {
       const _anyOverlayOpen = this._iconOverlay || this._creatorOverlay || this._searchOverlay ||
         this._onlineLevelsOverlay || this._settingsLayerOverlay || this._settingsPopup ||
         this._infoPopup || this._newgroundsPopup || this._statsLayerOverlay || this._updateLogPopup;
-      if (!_anyOverlayOpen && (this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown) && !this._spaceWasDown) {
+      if (!_anyOverlayOpen && (this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown || this._enterKey.isDown) && !this._spaceWasDown) {
         if (this._creatorMenuOpen) return;
         this._spaceWasDown = true;
         if (this._levelSelectOverlay) {
@@ -5364,7 +7582,7 @@ _buildSettingsPopup() {
         }
       }
       this._arrowWasDown = _arrowLeft || _arrowRight;
-      this._spaceWasDown = this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown || this._lKey.isDown;
+      this._spaceWasDown = this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown || this._lKey.isDown || this._enterKey.isDown;
       const menuDelta = Math.min(deltaTime / 1000 * 60, 2);
       const menuSpeed = 0.85;
       this._menuCameraX = (this._menuCameraX || 0) + menuDelta * playerSpeed * d * menuSpeed;
@@ -5401,6 +7619,7 @@ _buildSettingsPopup() {
       this._level.topContainer.x = -this._cameraX;
       this._level.topContainer.y = this._cameraY;
       this._level.updateVisibility(this._cameraX);
+      this._level.updateObjectDebugIds();
       this._updateBackground();
       this._level.stepGroundAnimation(deltaTime / 1000);
       this._level.updateGroundTiles(this._cameraY);
@@ -5429,16 +7648,18 @@ _buildSettingsPopup() {
       }
       return;
     }
-    let _0x368ad9 = this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown || this._lKey.isDown;
-    if (!this._updateLogPopup && _0x368ad9 && !this._spaceWasDown) {
-      this._pushButton();
-    } else if (!_0x368ad9 && this._spaceWasDown) {
-      this._releaseButton();
-    }
-    this._spaceWasDown = _0x368ad9;
+    this._applyJumpInput = () => {
+      const jumpHeld = this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown || this._lKey.isDown || this._enterKey.isDown;
+      if (!this._updateLogPopup && jumpHeld && !this._spaceWasDown) {
+        this._pushButton();
+      } else if (!jumpHeld && this._spaceWasDown) {
+        this._releaseButton();
+      }
+      this._spaceWasDown = jumpHeld;
+    };
 
     const objectsUnderPointer = this.input.manager.hitTest(
-      this.input.activePointer, 
+      this.input.activePointer,
       this._startPosGui.list,
       this.cameras.main
     );
@@ -5450,7 +7671,7 @@ _buildSettingsPopup() {
       this._state.upKeyDown = true;
       this._state.queuedHold = true;
     }
-    if (cancelInput){
+    if (cancelInput) {
       this._state.upKeyDown = false;
       this._state.upKeyPressed = false;
       this._state.queuedHold = false;
@@ -5502,9 +7723,23 @@ _buildSettingsPopup() {
         let _0x169d53 = this._playerWorldX;
         this._lastPercent = Math.min(99, Math.max(0, Math.floor(_0x169d53 / _0x435587 * 100)));
         if (this._lastPercent > this._bestPercent && !this._practicedMode.practiceMode) {
+          const prevBest = this._bestPercent;
           this._bestPercent = this._lastPercent;
           localStorage.setItem("bestPercent_" + (window.currentlevel[2] || "level_1"), this._bestPercent);
           this._hadNewBest = true;
+          const levelStars = window.currentlevel[4] || 0;
+          if (levelStars > 0) {
+            const maxOrbs = this._starsToOrbs(levelStars);
+            const progressPool = maxOrbs * 0.8;
+            const prevOrbs = Math.round(progressPool * prevBest / 100);
+            const newOrbs = Math.round(progressPool * this._lastPercent / 100);
+            const orbDelta = newOrbs - prevOrbs;
+            if (orbDelta > 0) {
+              window._totalOrbs = (window._totalOrbs || 0) + orbDelta;
+              localStorage.setItem("gd_totalOrbs", window._totalOrbs);
+              this._newBestOrbDelta = orbDelta;
+            }
+          }
           this._showNewBest();
         }
         if (this._practicedMode.practiceMode) {
@@ -5519,7 +7754,8 @@ _buildSettingsPopup() {
       }
       this._player.updateExplosionPieces(deltaTime);
       this._deathTimer += deltaTime;
-      let _0x237728 = this._hadNewBest ? 1400 : 1000;
+      const baseDelay = (window.respawnTime ?? 1.0) * 1000;
+      let _0x237728 = this._hadNewBest ? baseDelay + 400 : baseDelay;
       if (this._deathTimer > _0x237728) {
         if (this._practicedMode.practiceMode) {
           this._respawnFromCheckpoint();
@@ -5548,7 +7784,8 @@ _buildSettingsPopup() {
     if (this._level && this._level._sawSprites) {
       const sawRotation = deltaTime * 0.003;
       for (let _saw of this._level._sawSprites) {
-        if (_saw && _saw.active) _saw.rotation += sawRotation;
+        // Culled saws don't need to spin — skips the transform dirty for off-screen sections
+        if (_saw && _saw.active && (!_saw.parentContainer || _saw.parentContainer.visible)) _saw.rotation += sawRotation;
       }
     }
     this._level.updateAudioScale(this._audio.getMeteringValue());
@@ -5609,6 +7846,11 @@ _buildSettingsPopup() {
     const initialY = this._state.y;
     for (let i = 0; i < subSteps; i++) {
       this._state.lastY = this._state.y;
+      this._physicsFrame++;
+      this._applyJumpInput();
+      if (this._macroBot?.playing) {
+        this._macroBot.step(this._physicsFrame);
+      }
       this._player.updateJump(verticalDelta);
       this._state.y += this._state.yVelocity * verticalDelta;
       this._player.checkCollisions(this._playerWorldX - centerX);
@@ -5625,20 +7867,31 @@ _buildSettingsPopup() {
           this._player.killPlayer();
         }
       }
-if (!this._state.isFlying && !this._state.isWave && !this._state.isUfo) {
-  if (this._state.isBall) {
-    const ballOnSurface = this._state.onGround || this._state.onCeiling;
-    this._player.updateBallRoll(horizontalDelta, ballOnSurface);
-  } else if (this._state.onGround) {
-    this._player.updateGroundRotation(verticalDelta);
-  } else if (this._player.rotateActionActive) {
-    this._player.updateRotateAction(u);
-  } else if (this._state.isDashing) {
-    this._player.updateDashRotation(u);
-  }
-}
+      if (!this._state.isFlying && !this._state.isWave && !this._state.isUfo) {
+        if (this._state.isBall) {
+          const ballOnSurface = this._state.onGround || this._state.onCeiling;
+          this._player.updateBallRoll(horizontalDelta, ballOnSurface);
+        } else if (this._state.onGround) {
+          this._player.updateGroundRotation(verticalDelta);
+        } else if (this._player.rotateActionActive) {
+          this._player.updateRotateAction(u);
+        } else if (this._state.isDashing) {
+          this._player.updateDashRotation(u);
+        }
+      }
+
+      if (!this._player._scene._slideIn){
+        if (!this._player._hitboxTrail) this._player._hitboxTrail = [];
+        if (!this._player.p.isDead) {
+          const _trailSize = this._player.p.isMini ? 18 : 30;
+          this._player._hitboxTrail.push({ x: this._playerWorldX, y: this._player.p.y, rotation: this._player._rotation, size: _trailSize, isWave: this._player.p.isWave });
+          if (this._player._hitboxTrail.length > 180) this._player._hitboxTrail.shift();
+        }
+      }
     }
     this._state.lastY = initialY;
+    this._state.ignorePortals = false;
+    this._state2.ignorePortals = false;
     if (!this._endCameraOverride) {
       const cameraOffsetX = this._playerWorldX - centerX;
       if (this._level.endXPos > 0) {
@@ -5704,6 +7957,7 @@ if (!this._state.isFlying && !this._state.isWave && !this._state.isUfo) {
     this._bg.setTint(this._colorManager.getHex(fs));
     this._level.setGroundColor(this._colorManager.getHex(gs));
     this._level.updateVisibility(this._cameraX);
+    this._level.updateObjectDebugIds();
     this._level.checkEnterEffectTriggers(playerX);
     this._level.applyEnterEffects(this._cameraX);
     this._glitterCenterX = this._cameraX + screenWidth / 2;
@@ -5723,19 +7977,29 @@ if (!this._state.isFlying && !this._state.isWave && !this._state.isUfo) {
   }
 
 _handleEditorCamera = (delta) => {
+    if (this._editorTextInputFocused) {
+        this._level.container.x = -this._cameraX;
+        this._level.container.y = -this._cameraY;
+        this._level.additiveContainer.x = -this._cameraX;
+        this._level.additiveContainer.y = -this._cameraY;
+        this._level.topContainer.x = -this._cameraX;
+        this._level.topContainer.y = -this._cameraY;
+        return;
+    }
+
+    // Camera pans with arrow keys only — WASD is reserved for moving the selected object
     const camSpeed = 15;
     const cursors = this.input.keyboard.createCursorKeys();
-    const wasd = this.input.keyboard.addKeys('W,A,S,D');
 
-    if (cursors.left.isDown || wasd.A.isDown) {
+    if (cursors.left.isDown) {
         this._cameraX -= camSpeed;
-    } else if (cursors.right.isDown || wasd.D.isDown) {
+    } else if (cursors.right.isDown) {
         this._cameraX += camSpeed;
     }
 
-    if (cursors.up.isDown || wasd.W.isDown) {
+    if (cursors.up.isDown) {
         this._cameraY -= camSpeed;
-    } else if (cursors.down.isDown || wasd.S.isDown) {
+    } else if (cursors.down.isDown) {
         this._cameraY += camSpeed;
     }
 
@@ -5753,8 +8017,13 @@ _handleEditorCamera = (delta) => {
 _initEditorLogic = () => {
     if (this._editorGridGraphics) this._editorGridGraphics.destroy();
     this._editorGridGraphics = this.add.graphics().setDepth(5);
-    const allObj = window.allobjects();
-    this._totalIds = Object.keys(allObj).length;
+const allObj = window.allobjects();
+let maxId = 0;
+for (const key in allObj) {
+    const num = parseInt(key, 10);
+    if (!isNaN(num) && num > maxId) maxId = num;
+}
+this._totalIds = maxId;
     this._editorPage = 0;
     this._maxPerPage = 12;
     this._isSwipeEnabled = false;
@@ -5766,7 +8035,13 @@ _initEditorLogic = () => {
     this._editorTab = "build";
     window.editorSelectedObject = -1;
     this._editorZoom = 1.0;
+    this._editorPlaytestActive = false;
+    this._editorPlaytestPaused = false;
+    this._editorPlaytestSavedView = null;
+    this._editorPlaytestPauseView = null;
+    this._editorPlaytestLastTrailPoint = null;
     this.input.on('pointerdown', (pointer) => {
+        if (this._editorPlaytestActive && !this._editorPlaytestPaused) return;
         this._clickStartPos.x = pointer.x;
         this._clickStartPos.y = pointer.y;
         this._cameraStartX = this._cameraX;
@@ -5774,6 +8049,13 @@ _initEditorLogic = () => {
         this._isDragging = false;
     });
     this.input.on('pointerup', (pointer) => {
+        if (this._editorPlaytestActive && !this._editorPlaytestPaused) {
+            this._lastSwipeGridX = -1;
+            this._lastSwipeGridY = -1;
+            this._isDragging = false;
+            this._isDraggingSlider = false;
+            return;
+        }
         if (!this._isSwipeEnabled && !this._isDragging && !this._isDraggingSlider && this._hitObjects.length === 0) {
             this._editorAction();
         }
@@ -5790,9 +8072,11 @@ _createEditorGui = () => {
     const bottomY = screenHeight - 100;
 
     this._editorGui = this.add.container(screenWidth - 40, 40).setScrollFactor(0).setDepth(1000);
+    const editorSettings = this.add.image(-87, 0, "GJ_GameSheet03", "GJ_optionsBtn02_001.png").setInteractive().setAngle(-90).setFlipX(true);
     const editorPause = this.add.image(0, 0, "GJ_GameSheet03", "GJ_pauseBtn_001.png").setInteractive().setFlipX(true).setAngle(-90);
-    this._deleteButton = this.add.image(50, 40, "GJ_GameSheet03", "GJ_trashBtn_001.png").setInteractive();
-    this._editorGui.add(editorPause, this._deleteButton);
+    this._deleteButton = this.add.image(-(screenWidth - 40) + 50, 0, "GJ_GameSheet03", "GJ_trashBtn_001.png").setInteractive();
+    this._editorGui.add([editorSettings, editorPause, this._deleteButton]);
+    this._makeBouncyButton(editorSettings, 1.0, () => {this._openEditorLevelSettingsPopup();}, () => !this._editorLevelSettingsPopup);
     this._makeBouncyButton(editorPause, 1.0, () => this._showEditorPauseMenu(true), () => true);
     this._makeBouncyButton(this._deleteButton, 0.9, () => this._deleteSelectedObject(), () => true);
     this._initEditorPauseMenu();
@@ -5821,7 +8105,7 @@ _createEditorGui = () => {
 
     this._swipeContainer.add([this._swipeBg, this._swipeText]);
 
-    this._makeBouncyButton(this._swipeBg, 0.8, () => {
+    this._makeCompositeBouncyButton(this._swipeBg, [this._swipeBg, this._swipeText], 0.8, () => {
         this._isSwipeEnabled = !this._isSwipeEnabled;
 
         if (this._isSwipeEnabled) {
@@ -5884,6 +8168,24 @@ _createEditorGui = () => {
     this._makeBouncyButton(zoomInBtn, 0.9, () => this._adjustZoom(0.1));
     this._makeBouncyButton(zoomOutBtn, 0.9, () => this._adjustZoom(-0.1));
 
+    this._editorPlaytestControls = this.add.container(48, screenHeight / 2 - 110).setScrollFactor(0).setDepth(1500);
+    const playtestButtonScale = 1.1;
+
+    this._editorPlaytestPlayBtn = this.add.image(0, 0, "GJ_GameSheet03", "GJ_playEditorBtn_001.png").setAngle(90).setFlipY(true).setInteractive().setScale(playtestButtonScale);
+    this._editorPlaytestPauseBtn = this.add.image(0, 0, "GJ_GameSheet03", "GJ_pauseEditorBtn_001.png").setAngle(90).setFlipY(true).setInteractive().setScale(playtestButtonScale).setVisible(false);
+    this._editorPlaytestStopBtn = this.add.image(90, 0, "GJ_GameSheet03", "GJ_stopEditorBtn_001.png").setAngle(90).setFlipY(true).setInteractive().setScale(playtestButtonScale).setVisible(false);
+
+    this._editorPlaytestControls.add([
+        this._editorPlaytestPlayBtn,
+        this._editorPlaytestPauseBtn,
+        this._editorPlaytestStopBtn
+    ]);
+
+    this._makeBouncyButton(this._editorPlaytestPlayBtn, playtestButtonScale, () => this._startEditorPlaytest(), () => !this._editorPlaytestActive);
+    this._makeBouncyButton(this._editorPlaytestPauseBtn, playtestButtonScale, () => this._toggleEditorPlaytestPause(), () => this._editorPlaytestActive);
+    this._makeBouncyButton(this._editorPlaytestStopBtn, playtestButtonScale, () => this._stopEditorPlaytest(), () => this._editorPlaytestActive);
+    this._refreshEditorPlaytestControls();
+
     this._zoomText = this.add.bitmapText(screenWidth / 2, 80, "bigFont", "Zoom: 1.00x", 40).setOrigin(0.5).setScrollFactor(0).setDepth(2000).setAlpha(0);
 
     this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
@@ -5894,10 +8196,785 @@ _createEditorGui = () => {
     this._updateEditorActionButtons();
     this._updateTabVisuals();
     this._buildObjectGrid();
+
+    // Editor keybinds: Enter = playtest toggle, 1/2/3 = build/edit/delete tab,
+    // WASD = move selected object one grid block, Shift+WASD = fine step,
+    // Q/E = rotate CCW/CW (like GD), Backspace/Delete = delete selected object.
+    this.input.keyboard.on('keydown', (event) => {
+        if (!window.isEditor) return;
+        // Never fire while typing in a text field or while a popup / pause menu is up
+        if (this._editorTextInputFocused || window._activeCustomInput || this._activeInput) return;
+        if (window.isEditorPause || this._editorLevelSettingsPopup || this._editorStartOptionsPopup ||
+            this._editorColorPickerPopup || this._editorHorizontalOptionPopup || this._settingsPopup) return;
+
+        const code = event.code;
+        if (code === 'Enter' || code === 'NumpadEnter') {
+            if (event.repeat) return;
+            if (this._editorPlaytestActive) this._stopEditorPlaytest();
+            else this._startEditorPlaytest();
+            return;
+        }
+        if (this._editorPlaytestActive) return; // everything below is edit-mode only
+
+        if (code === 'Digit1' || code === 'Digit2' || code === 'Digit3') {
+            if (event.repeat) return;
+            const tab = code === 'Digit1' ? 'build' : code === 'Digit2' ? 'edit' : 'delete';
+            if (this._editorTab !== tab) {
+                this._editorTab = tab;
+                this._editorPage = 0;
+                this._updateTabVisuals();
+                this._buildObjectGrid();
+            }
+            return;
+        }
+        const _mv = event.shiftKey ? 3 : 60; // plain = one grid block, shift = fine step
+        if (code === 'KeyW') { this._moveObject(0, -_mv); return; }
+        if (code === 'KeyS') { this._moveObject(0, _mv); return; }
+        if (code === 'KeyA') { this._moveObject(-_mv, 0); return; }
+        if (code === 'KeyD') { this._moveObject(_mv, 0); return; }
+        if (code === 'KeyQ') { if (!event.repeat) this._rotateObject(-90); return; }
+        if (code === 'KeyE') { if (!event.repeat) this._rotateObject(90); return; }
+        if (code === 'Backspace' || code === 'Delete') {
+            event.preventDefault();
+            if (event.repeat) return;
+            this._deleteSelectedObject();
+            return;
+        }
+    });
+
     this._initEditorTimeline();
 };
 
+_refreshEditorPlaytestControls = () => {
+    if (!this._editorPlaytestPlayBtn || !this._editorPlaytestPauseBtn || !this._editorPlaytestStopBtn) return;
+
+    const active = !!this._editorPlaytestActive;
+    this._editorPlaytestPlayBtn.setVisible(!active);
+    this._editorPlaytestPauseBtn.setVisible(active);
+    this._editorPlaytestStopBtn.setVisible(active);
+
+    if (active) {
+        this._editorPlaytestPauseBtn
+            .setTexture(
+                "GJ_GameSheet03",
+                this._editorPlaytestPaused ? "GJ_playEditorBtn_001.png" : "GJ_pauseEditorBtn_001.png"
+            )
+            .setAlpha(1);
+        this._editorPlaytestStopBtn.setAlpha(1);
+    } else {
+        this._editorPlaytestPauseBtn
+            .setTexture("GJ_GameSheet03", "GJ_pauseEditorBtn_001.png")
+            .setAlpha(1);
+        this._editorPlaytestStopBtn.setAlpha(1);
+    }
+};
+
+_setEditorPlaytestGuiVisible = (visible) => {
+    const guiObjects = [
+        this._editorGui,
+        this._toolbox,
+        this._zoomButtons,
+        this._sideButtons,
+        this._timelineContainer,
+        this._zoomText
+    ];
+
+    for (const obj of guiObjects) {
+        if (obj && typeof obj.setVisible === "function") {
+            obj.setVisible(visible);
+        }
+    }
+};
+
+_setEditorLevelSectionsFullyVisible = () => {
+    if (!this._level?._sectionContainers) return;
+
+    for (let i = 0; i < this._level._sectionContainers.length; i++) {
+        if (typeof this._level._setSectionVisible === "function") {
+            this._level._setSectionVisible(i, true);
+            continue;
+        }
+
+        const section = this._level._sectionContainers[i];
+        if (section?.additive) section.additive.visible = true;
+        if (section?.normal) section.normal.visible = true;
+    }
+
+    this._level.resetVisibility?.();
+};
+
+_resetEditorPlaytestSectionCulling = () => {
+    if (!this._level) return;
+
+    this._level.resetVisibility?.();
+    this._level.updateVisibility?.(this._cameraX);
+};
+
+_refreshEditorPlaytestGlowVisibility = () => {
+    if (!this._level) return;
+
+    if (this._editorPlaytestActive) {
+        const glowVisible = !!window.showEditorGlow;
+        this._level.additiveContainer?.setVisible(glowVisible);
+        if (this._level._glowSprites) {
+            for (const glow of this._level._glowSprites) {
+                glow?.setVisible?.(glowVisible);
+            }
+        }
+        return;
+    }
+
+    this._level.additiveContainer?.setVisible(true);
+    this._level._updateGlowVisibility?.();
+};
+
+_getEditorPlaytestCameraYTarget = () => {
+    let currentNormalCameraY = -(this._cameraY || 0);
+    let targetNormalCameraY = currentNormalCameraY;
+
+    if (this._level?.flyCameraTarget !== null && this._level?.flyCameraTarget !== undefined) {
+        targetNormalCameraY = this._level.flyCameraTarget;
+    } else {
+        const playerY = this._state?.y || 0;
+        const highMargin = 140;
+        const lowMargin = 80;
+        const cameraCenterY = currentNormalCameraY - o + 320;
+
+        if (this._state?.gravityFlipped) {
+            if (playerY > cameraCenterY + lowMargin) {
+                targetNormalCameraY = playerY - 320 - lowMargin + o;
+            } else if (playerY < cameraCenterY - highMargin) {
+                targetNormalCameraY = playerY - 320 + highMargin + o;
+            }
+        } else {
+            if (playerY > cameraCenterY + highMargin) {
+                targetNormalCameraY = playerY - 320 - highMargin + o;
+            } else if (playerY < cameraCenterY - lowMargin) {
+                targetNormalCameraY = playerY - 320 + lowMargin + o;
+            }
+        }
+    }
+
+    return -Math.max(0, targetNormalCameraY || 0);
+};
+
+_updateEditorPlaytestCameraY = (delta = 0, instant = false) => {
+    const targetCameraY = this._getEditorPlaytestCameraYTarget();
+
+    if (instant || delta === 0) {
+        this._cameraY = targetCameraY;
+        return;
+    }
+
+    const currentNormalCameraY = -(this._cameraY || 0);
+    const targetNormalCameraY = -targetCameraY;
+    let nextNormalCameraY = currentNormalCameraY + ((targetNormalCameraY - currentNormalCameraY) / (10 / delta));
+
+    if (nextNormalCameraY < 0) nextNormalCameraY = 0;
+    this._cameraY = -nextNormalCameraY;
+};
+
+_updateEditorPlaytestBackground = () => {
+    this._bg.tilePositionX += (this._cameraX - this._prevCameraX) * this._bgSpeedX;
+    this._prevCameraX = this._cameraX;
+    this._bg.tilePositionY = this._bgInitY + this._cameraY * this._bgSpeedY;
+};
+
+_setEditorZoomInstant = (zoom, cameraX = this._cameraX, cameraY = this._cameraY) => {
+    this._editorZoom = Phaser.Math.Clamp(zoom, 0.1, 4.0);
+    this._cameraX = cameraX;
+    this._cameraY = cameraY;
+
+    this._level.topContainer.setScale(this._editorZoom);
+    this._level.additiveContainer.setScale(this._editorZoom);
+    this._level.container.setScale(this._editorZoom);
+
+    this._level.topContainer.x = -this._cameraX;
+    this._level.topContainer.y = -this._cameraY;
+    this._level.additiveContainer.x = -this._cameraX;
+    this._level.additiveContainer.y = -this._cameraY;
+    this._level.container.x = -this._cameraX;
+    this._level.container.y = -this._cameraY;
+
+    this._cameraXRef._v = this._cameraX;
+    this._bg.tilePositionX = this._cameraX * 0.1;
+    this._bg.tilePositionY = this._bgInitY + this._cameraY * 0.1;
+    this._updateEditorGrid();
+    this._updateEditorTimeline();
+};
+
+_clearEditorPlaytestMarks = () => {
+    if (this._editorPlaytestTrailGfx) {
+        this._editorPlaytestTrailGfx.destroy();
+        this._editorPlaytestTrailGfx = null;
+    }
+
+    if (this._editorPlaytestDeathMarks) {
+        for (const mark of this._editorPlaytestDeathMarks) {
+            if (mark && mark.destroy) mark.destroy();
+        }
+    }
+
+    this._editorPlaytestDeathMarks = [];
+    this._editorPlaytestLastTrailPoint = null;
+};
+
+_ensureEditorPlaytestTrail = () => {
+    if (this._editorPlaytestTrailGfx) return this._editorPlaytestTrailGfx;
+
+    const gfx = this.add.graphics();
+    gfx.setDepth(100);
+    this._level.topContainer.add(gfx);
+    this._editorPlaytestTrailGfx = gfx;
+    return gfx;
+};
+
+_drawEditorPlaytestTrailPoint = () => {
+    if (!this._editorPlaytestActive || !this._player) return;
+
+    const point = {
+        x: this._playerWorldX,
+        y: b(this._state.y)
+    };
+
+    const last = this._editorPlaytestLastTrailPoint;
+    if (last) {
+        const dx = point.x - last.x;
+        const dy = point.y - last.y;
+        if ((dx * dx) + (dy * dy) >= 2) {
+            const gfx = this._ensureEditorPlaytestTrail();
+            gfx.lineStyle(2, 0x00ff00, 0.95);
+            gfx.lineBetween(last.x, last.y, point.x, point.y);
+        }
+    }
+
+    this._editorPlaytestLastTrailPoint = point;
+};
+
+_addEditorPlaytestDeathMark = () => {
+    const x = this._playerWorldX;
+    const y = b(this._state.y);
+    const size = 28;
+    const mark = this.add.graphics();
+
+    mark.setDepth(110);
+    mark.lineStyle(13, 0xff0000, 1);
+    mark.lineBetween(x - size, y - size, x + size, y + size);
+    mark.lineBetween(x - size, y + size, x + size, y - size);
+
+    this._level.topContainer.add(mark);
+    if (!this._editorPlaytestDeathMarks) this._editorPlaytestDeathMarks = [];
+    this._editorPlaytestDeathMarks.push(mark);
+};
+
+_resetEditorPlaytestLevelState = () => {
+    this._level.resetObjects();
+    this._level.resetGroundState();
+    this._level.resetColorTriggers();
+    this._level.resetAlphaTriggers();
+    this._level.resetRotateTriggers();
+    this._level.resetPulseTriggers();
+    this._level.resetEnterEffectTriggers();
+    this._level.resetMoveTriggers();
+    this._level.resetVisibility();
+
+    this._colorManager.reset();
+    this._level.applyColorChannels(this._colorManager);
+    this._bg.setTint(this._colorManager.getHex(fs));
+    this._level.setGroundColor(this._colorManager.getHex(gs));
+};
+
+_refreshEditorCollisionCaches = () => {
+    if (!this._level) return;
+
+    const liveObjectIds = new Set();
+    if (Array.isArray(window.levelObjects)) {
+        window.levelObjects.forEach((obj, index) => {
+            if (!obj || !obj.id) return;
+            const linkedId = Number.isInteger(obj._eeObjectId) ? obj._eeObjectId : index;
+            liveObjectIds.add(linkedId);
+        });
+    }
+
+    const sourceColliders = Array.isArray(this._level.objects) ? this._level.objects : [];
+    this._level.objects = sourceColliders.filter(collider => {
+        if (!collider) return false;
+        const objectId = Number.isInteger(collider._eeObjectId) ? collider._eeObjectId : -1;
+        return liveObjectIds.has(objectId);
+    });
+
+    this._level._collisionSections = [];
+    this._level._groupColliders = {};
+
+    for (const collider of this._level.objects) {
+        if (!collider) continue;
+
+        if (typeof this._level._addCollisionToSection === "function") {
+            this._level._addCollisionToSection(collider);
+        }
+
+        if (Array.isArray(collider._eeGroups)) {
+            for (const groupId of collider._eeGroups) {
+                if (!this._level._groupColliders[groupId]) this._level._groupColliders[groupId] = [];
+                this._level._groupColliders[groupId].push(collider);
+            }
+        }
+    }
+};
+
+_getEditorSaveIndexForObjectId = (objectId) => {
+    if (!Array.isArray(window.levelObjects) || !Number.isInteger(objectId)) return -1;
+
+    for (let i = 0; i < window.levelObjects.length; i++) {
+        const obj = window.levelObjects[i];
+        if (obj && Number.isInteger(obj._eeObjectId) && obj._eeObjectId === objectId) {
+            return i;
+        }
+    }
+
+    const fallback = window.levelObjects[objectId];
+    return fallback && fallback.id ? objectId : -1;
+};
+
+_getEditorSaveObjectForObjectId = (objectId) => {
+    const saveIndex = this._getEditorSaveIndexForObjectId(objectId);
+    return saveIndex === -1 ? null : window.levelObjects[saveIndex];
+};
+
+_getEditorCollidersForObjectId = (objectId) => {
+    if (!Array.isArray(this._level?.objects) || !Number.isInteger(objectId)) return [];
+    return this._level.objects.filter(collider => {
+        if (!collider) return false;
+        return Number.isInteger(collider._eeObjectId) && collider._eeObjectId === objectId;
+    });
+};
+
+_hideEditorPlaytestGlowLayers = () => {
+    const hideForPlayer = (player) => {
+        if (!player) return;
+
+        const glowLayers = [
+            player._playerGlowLayer,
+            player._shipGlowLayer,
+            player._ballGlowLayer,
+            player._waveGlowLayer,
+            player._spiderGlowLayer,
+            player._birdGlowLayer
+        ];
+
+        if (!window.showEditorGlow) {
+            for (const layer of glowLayers) {
+                if (layer?.sprite) layer.sprite.setVisible(false);
+            }
+        }
+
+        if (player._dashAnimationSprite) {
+            player._dashAnimationSprite.setVisible(false);
+        }
+    };
+
+    hideForPlayer(this._player);
+    hideForPlayer(this._player2);
+};
+
+_hideEditorPlaytestPlayer = () => {
+    const hidePlayer = (player) => {
+        if (!player) return;
+        player.setCubeVisible(false);
+        player.setShipVisible(false);
+        player.setBallVisible(false);
+        player.setWaveVisible(false);
+        player.setBirdVisible(false);
+        player.setSpiderVisible(false);
+    };
+
+    hidePlayer(this._player);
+    hidePlayer(this._player2);
+    this._hideEditorPlaytestGlowLayers();
+};
+
+_syncEditorPlaytestPlayerVisual = (deltaSeconds = 0) => {
+    if (!this._editorPlaytestActive || !this._player || this._state.isDead) return;
+
+    const zoom = this._editorZoom || 1;
+    const playerScreenX = (this._playerWorldX * zoom) - this._cameraX;
+    const playerScreenY = (b(this._state.y) * zoom) - this._cameraY;
+    const playerScreenYCameraOffset = (b(this._state.y) * (zoom - 1)) - this._cameraY;
+
+    this._player.syncSprites(
+        this._cameraX,
+        playerScreenYCameraOffset,
+        deltaSeconds,
+        this._getMirrorXOffset(playerScreenX)
+    );
+
+    if (this._isDual && this._player2 && !this._state2.isDead) {
+        this._player2.syncSprites(
+            this._cameraX,
+            (b(this._state2.y) * (zoom - 1)) - this._cameraY,
+            deltaSeconds,
+            this._getMirrorXOffset(playerScreenX)
+        );
+    }
+
+    if (zoom !== 1) {
+        const scalePlayer = (player, anchorY) => {
+            for (const layer of (player?._allLayers || [])) {
+                if (!layer?.sprite) continue;
+                layer.sprite.x = playerScreenX + ((layer.sprite.x - playerScreenX) * zoom);
+                layer.sprite.y = anchorY + ((layer.sprite.y - anchorY) * zoom);
+                layer.sprite.scaleX *= zoom;
+                layer.sprite.scaleY *= zoom;
+            }
+            if (player?._dashAnimationSprite) {
+                player._dashAnimationSprite.x = playerScreenX + ((player._dashAnimationSprite.x - playerScreenX) * zoom);
+                player._dashAnimationSprite.y = anchorY + ((player._dashAnimationSprite.y - anchorY) * zoom);
+                player._dashAnimationSprite.scaleX *= zoom;
+                player._dashAnimationSprite.scaleY *= zoom;
+            }
+        };
+
+        scalePlayer(this._player, playerScreenY);
+        if (this._isDual && this._player2 && !this._state2.isDead) {
+            scalePlayer(this._player2, (b(this._state2.y) * zoom) - this._cameraY);
+        }
+    }
+
+    this._hideEditorPlaytestGlowLayers();
+};
+
+_applyEditorPlaytestStartMode = () => {
+    let speedKey = parseInt(window.settingsMap?.["kA4"] || "0", 10);
+    if (speedKey == 0) {
+      playerSpeed = SpeedPortal.ONE_TIMES;
+    } else if (speedKey == 1) {
+      playerSpeed = SpeedPortal.HALF;
+    } else if (speedKey == 2) {
+      playerSpeed = SpeedPortal.TWO_TIMES;
+    } else if (speedKey == 3) {
+      playerSpeed = SpeedPortal.THREE_TIMES;
+    } else if (speedKey == 4) {
+      playerSpeed = SpeedPortal.FOUR_TIMES;
+    }
+
+    const gamemode = parseInt(window.settingsMap?.["kA2"] || "0", 10);
+    if (gamemode == 1) {
+      this._player.enterShipMode();
+    } else if (gamemode == 2) {
+      this._state.y = 30;
+      this._player.enterBallMode({ y: 30 });
+    } else if (gamemode == 3) {
+      this._player.enterUfoMode();
+    } else if (gamemode == 4) {
+      this._player.enterWaveMode();
+    } else if (gamemode == 6) {
+      this._player.enterSpiderMode();
+    }
+
+    const getBool = (key) => parseInt(window.settingsMap?.[key] || "0", 10) === 1;
+    this._state.isMini = getBool("kA3");
+    this._state.gravityFlipped = getBool("kA11");
+    this._state.mirrored = false;
+
+    if (getBool("kA8")) {
+        this._enableDualMode();
+        this._state2.mirrored = false;
+    }
+
+    this._hideEditorPlaytestGlowLayers();
+    this._refreshEditorPlaytestGlowVisibility();
+};
+
+_startEditorPlaytest = () => {
+    if (this._editorPlaytestActive) return;
+
+    this._closeEditorLevelSettingsPopup();
+    this._closeEditorHorizontalOptionPopup();
+    this._closeEditorColorPickerPopup();
+    this._closeEditorStartOptionsPopup();
+    this._clearEditorSelection();
+    this._clearEditorPlaytestMarks();
+    this._refreshEditorCollisionCaches();
+
+    this._editorPlaytestSavedView = {
+        zoom: this._editorZoom || 1,
+        cameraX: this._cameraX || 0,
+        cameraY: this._cameraY || 0
+    };
+    this._editorPlaytestPauseView = null;
+
+    this._editorPlaytestActive = true;
+    this._editorPlaytestPaused = false;
+    this._spaceWasDown = !!this.input.activePointer?.isDown;
+    this._deltaBuffer = 0;
+    this._physicsFrame = 0;
+    this._playerWorldX = 0;
+    this._cameraX = -centerX;
+    this._cameraY = 0;
+    this._cameraXRef._v = this._cameraX;
+    this._prevCameraX = this._cameraX;
+
+    this._resetEditorPlaytestLevelState();
+    this._state.reset();
+    this._player.reset();
+    this._isDual = false;
+    this._state2.reset();
+    this._player2.reset();
+    this._player2.setCubeVisible(false);
+    this._player2.setShipVisible(false);
+    this._player2.setBallVisible(false);
+    this._player2.setWaveVisible(false);
+    this._player2.setBirdVisible(false);
+    this._player2.setSpiderVisible(false);
+
+    this._state.y = 30;
+    this._state.onGround = true;
+    this._state.canJump = true;
+    this._player.setCubeVisible(true);
+    this._applyEditorPlaytestStartMode();
+    this._state.mirrored = false;
+    this._state2.mirrored = false;
+    this._bg.setFlipX(false);
+    this._updateEditorPlaytestCameraY(0, true);
+    this._setEditorZoomInstant(1, -centerX, this._cameraY);
+    this._refreshEditorPlaytestGlowVisibility();
+    this._audio.reset();
+    this._audio.startMusic(0);
+    this._setEditorPlaytestGuiVisible(false);
+    this._refreshEditorPlaytestControls();
+    this._drawEditorPlaytestTrailPoint();
+};
+
+_toggleEditorPlaytestPause = () => {
+    if (!this._editorPlaytestActive) return;
+
+    if (!this._editorPlaytestPaused) {
+        this._editorPlaytestPauseView = {
+            zoom: this._editorZoom || 1,
+            cameraX: this._cameraX || 0,
+            cameraY: this._cameraY || 0
+        };
+        this._editorPlaytestPaused = true;
+        this._audio.pauseMusic();
+        this._setEditorPlaytestGuiVisible(true);
+        this._setEditorLevelSectionsFullyVisible();
+        this._refreshEditorPlaytestControls();
+        return;
+    }
+
+    const resumeView = this._editorPlaytestPauseView || {
+        zoom: 1,
+        cameraX: this._playerWorldX - centerX,
+        cameraY: this._cameraY || 0
+    };
+
+    this._editorPlaytestPaused = false;
+    this._setEditorPlaytestGuiVisible(false);
+    this._setEditorZoomInstant(resumeView.zoom || 1, resumeView.cameraX || 0, resumeView.cameraY || 0);
+    this._cameraXRef._v = this._cameraX;
+    this._prevCameraX = this._cameraX;
+    this._resetEditorPlaytestSectionCulling();
+    this._editorPlaytestPauseView = null;
+    this._audio.resumeMusic();
+    this._syncEditorPlaytestPlayerVisual(0);
+    this._refreshEditorPlaytestControls();
+};
+
+_stopEditorPlaytest = (leaveDeathMark = false) => {
+    if (!this._editorPlaytestActive) return;
+
+    if (leaveDeathMark) {
+        this._addEditorPlaytestDeathMark();
+    }
+
+    this._editorPlaytestActive = false;
+    this._editorPlaytestPaused = false;
+    this._spaceWasDown = false;
+    this._deltaBuffer = 0;
+
+    this._audio.reset();
+    this._hideEditorPlaytestPlayer();
+    this._resetEditorPlaytestLevelState();
+    this._refreshEditorPlaytestGlowVisibility();
+
+    const savedView = this._editorPlaytestSavedView;
+    const currentZoom = this._editorZoom || 1;
+    const restoreZoom = savedView?.zoom || currentZoom;
+    const worldCenterX = (this._cameraX + centerX) / currentZoom;
+    const worldCenterY = (this._cameraY + (screenHeight / 2)) / currentZoom;
+    const restoredCameraX = (worldCenterX * restoreZoom) - centerX;
+    const restoredCameraY = (worldCenterY * restoreZoom) - (screenHeight / 2);
+
+    this._editorPlaytestSavedView = null;
+    this._editorPlaytestPauseView = null;
+    this._setEditorZoomInstant(restoreZoom, restoredCameraX, restoredCameraY);
+    this._setEditorLevelSectionsFullyVisible();
+
+    this._setEditorPlaytestGuiVisible(true);
+    this._refreshEditorPlaytestControls();
+};
+
+_editorPlaytestPress = () => {
+    if (this._state.isDead) return;
+
+    this._state.upKeyDown = true;
+    this._state.upKeyPressed = true;
+    this._state.queuedHold = true;
+
+    if (!this._state.isFlying && !this._state.isWave && !this._state.isUfo && this._state.canJump) {
+        this._player.updateJump(0);
+    } else if (this._state.isUfo) {
+        this._player.updateJump(0);
+    }
+};
+
+_editorPlaytestRelease = () => {
+    this._state.upKeyDown = false;
+    this._state.upKeyPressed = false;
+    this._state.queuedHold = false;
+};
+
+_updateEditorPlaytestInput = () => {
+    const pointer = this.input.activePointer;
+    const hitObjects = this.input.hitTestPointer(pointer);
+    const overPlaytestControls = hitObjects.some(obj =>
+        obj === this._editorPlaytestPauseBtn ||
+        obj === this._editorPlaytestStopBtn ||
+        obj === this._editorPlaytestPlayBtn
+    );
+    const pointerHeld = pointer.isDown && !overPlaytestControls;
+    const jumpHeld = this._spaceKey.isDown || this._upKey.isDown || this._wKey.isDown || this._lKey.isDown || pointerHeld;
+
+    if (jumpHeld && !this._spaceWasDown) {
+        this._editorPlaytestPress();
+    } else if (!jumpHeld && this._spaceWasDown) {
+        this._editorPlaytestRelease();
+    }
+
+    this._spaceWasDown = jumpHeld;
+};
+
+_updateEditorPlaytest = (deltaTime) => {
+    if (!this._editorPlaytestActive || this._editorPlaytestPaused) return;
+
+    this._updateEditorPlaytestInput();
+    this._audio.update(deltaTime / 1000);
+    this._state.mirrored = false;
+    this._state2.mirrored = false;
+    this._bg.setFlipX(false);
+    this._refreshEditorPlaytestGlowVisibility();
+    this._level.updateEndPortalY(-this._cameraY, this._state.isFlying || this._state.isWave || this._state.isUfo);
+
+    let quantizedDelta = this._quantizeDelta(deltaTime);
+    let subSteps = quantizedDelta > 0 ? Math.max(1, Math.round(quantizedDelta * 4)) : 0;
+    if (subSteps > 60) subSteps = 60;
+
+    const subStepDelta = subSteps > 0 ? quantizedDelta / subSteps : 0;
+    const verticalDelta = subStepDelta * d;
+    const horizontalDelta = subStepDelta * playerSpeed * d;
+    const previousNoClip = window.noClip;
+
+    window.noClip = false;
+
+    try {
+        for (let i = 0; i < subSteps; i++) {
+            this._state.lastY = this._state.y;
+            this._physicsFrame++;
+            this._player.updateJump(verticalDelta);
+            this._state.y += this._state.yVelocity * verticalDelta;
+            this._player.checkCollisions(this._playerWorldX - centerX);
+
+            if (this._isDual && !this._state2.isDead) {
+                this._state2.upKeyDown = this._state.upKeyDown;
+                this._state2.upKeyPressed = this._state.upKeyPressed;
+                this._state2.queuedHold = this._state.queuedHold;
+                this._state2.lastY = this._state2.y;
+                this._player2.updateJump(verticalDelta);
+                this._state2.y += this._state2.yVelocity * verticalDelta;
+                this._player2.checkCollisions(this._playerWorldX - centerX);
+                if (this._state2.isDead && !this._state.isDead) {
+                    this._player.killPlayer();
+                }
+            }
+
+            if (this._state.isDead) break;
+
+            this._playerWorldX += horizontalDelta;
+
+            if (!this._state.isFlying && !this._state.isWave && !this._state.isUfo) {
+                if (this._state.isBall) {
+                    const ballOnSurface = this._state.onGround || this._state.onCeiling;
+                    this._player.updateBallRoll(horizontalDelta, ballOnSurface);
+                } else if (this._state.onGround) {
+                    this._player.updateGroundRotation(verticalDelta);
+                } else if (this._player.rotateActionActive) {
+                    this._player.updateRotateAction(u);
+                } else if (this._state.isDashing) {
+                    this._player.updateDashRotation(u);
+                }
+            }
+        }
+    } finally {
+        window.noClip = previousNoClip;
+    }
+
+    if (this._state.isDead) {
+        this._drawEditorPlaytestTrailPoint();
+        this._stopEditorPlaytest(true);
+        return;
+    }
+
+    this._state.ignorePortals = false;
+    this._state2.ignorePortals = false;
+
+    this._cameraX = this._playerWorldX - centerX;
+    this._updateEditorPlaytestCameraY(quantizedDelta);
+    this._cameraXRef._v = this._cameraX;
+
+    this._level.additiveContainer.x = -this._cameraX;
+    this._level.additiveContainer.y = -this._cameraY;
+    this._level.container.x = -this._cameraX;
+    this._level.container.y = -this._cameraY;
+    this._level.topContainer.x = -this._cameraX;
+    this._level.topContainer.y = -this._cameraY;
+
+    const playerX = this._playerWorldX;
+    for (let colorTrigger of this._level.checkColorTriggers(playerX)) {
+        this._colorManager.triggerColor(colorTrigger.index, colorTrigger.color, colorTrigger.duration);
+        if (colorTrigger.tintGround) {
+            this._colorManager.triggerColor(gs, colorTrigger.color, colorTrigger.duration);
+        }
+    }
+
+    this._level.checkMoveTriggers(playerX);
+    this._level.stepMoveTriggers(deltaTime / 1000);
+    this._level.checkAlphaTriggers(playerX);
+    this._level.stepAlphaTriggers(deltaTime / 1000);
+    this._level.checkRotateTriggers(playerX);
+    this._level.stepRotateTriggers(deltaTime / 1000);
+    this._level.checkPulseTriggers(playerX);
+    this._level.stepPulseTriggers(deltaTime / 1000, this._colorManager);
+    this._colorManager.step(deltaTime / 1000);
+    this._level.stepGroundAnimation(deltaTime / 1000);
+    this._level.applyColorChannels(this._colorManager);
+    this._bg.setTint(this._colorManager.getHex(fs));
+    this._level.setGroundColor(this._colorManager.getHex(gs));
+    this._level.updateVisibility(this._cameraX);
+    this._level.updateObjectDebugIds();
+    this._refreshEditorPlaytestGlowVisibility();
+
+    if (this._state.isFlying) {
+        this._player.updateShipRotation(quantizedDelta);
+    }
+
+    this._syncEditorPlaytestPlayerVisual(deltaTime / 1000);
+    this._drawEditorPlaytestTrailPoint();
+    this._updateEditorPlaytestBackground();
+};
+
 _adjustZoom = (delta, anchorX = screenWidth / 2, anchorY = screenHeight / 2) => {
+    if (this._editorPlaytestActive && !this._editorPlaytestPaused) return;
+
     const oldZoom = this._editorZoom;
     let newZoom = oldZoom + delta;
     newZoom = Phaser.Math.Clamp(newZoom, 0.1, 4.0);
@@ -5936,12 +9013,272 @@ _updateTabVisuals = () => {
 };
 
 _getSheetForFrameThingy = (frameName) => {
-    const sheets = ["GJ_WebSheet", "GJ_GameSheet", "GJ_GameSheet02", "GJ_GameSheet03", "GJ_GameSheet04"];
+    const sheets = ["GJ_WebSheet", "GJ_GameSheet", "GJ_GameSheet02", "GJ_GameSheet03", "GJ_GameSheet04", "GJ_GameSheetEditor"];
     for (const key of sheets) {
         if (this.textures.exists(key) && this.textures.get(key).has(frameName)) {
             return key;
         }
     }
+};
+
+_getTextureRefForFrameThingy = (frameName) => { // getSheetForFrameThingy: the sequel
+    const sheets = ["GJ_WebSheet", "GJ_GameSheet", "GJ_GameSheet02", "GJ_GameSheet03", "GJ_GameSheet04", "GJ_GameSheetEditor"];
+    for (const key of sheets) {
+        if (this.textures.exists(key) && this.textures.get(key).has(frameName)) {
+            return {
+                key,
+                frame: frameName
+            };
+        }
+    }
+    if (this.textures.exists(frameName)) {
+        return {
+            key: frameName,
+            frame: null
+        };
+    }
+    return null;
+};
+
+_createEditorObjectButtonPreview = (x, y, objId) => {
+    const objectDef = getObjectFromId(objId);
+    if (!objectDef) return null;
+
+    let frameName = objectDef.frame;
+
+    if (objectDef.randomFrames && objectDef.randomFrames.length) {
+        frameName = objectDef.randomFrames[0];
+    }
+
+    if (!frameName) return null;
+
+    // Object-sheet images created below are UI icons, not in-game objects
+    this._uhdPreviewIcons = true;
+
+    const previewObj = {
+        id: objId,
+        x: 0,
+        y: 0,
+        flipX: false,
+        flipY: false,
+        rot: 0,
+        scale: 1,
+        zLayer: objectDef.default_z_layer || 0,
+        zOrder: objectDef.default_z_order || 0,
+        groups: "",
+        color1: 0,
+        color2: 0,
+        _raw: {}
+    };
+
+    const preview = this.add.container(x, y);
+    const sprites = [];
+
+    const addPreviewSprite = (frame, localX = 0, localY = 0, colorData = null, previewDepth = 0, extra = {}) => {
+        const tex = this._getTextureRefForFrameThingy(frame);
+        if (!tex) return null;
+
+        const spr = tex.frame
+            ? this.add.image(localX, localY, tex.key, tex.frame)
+            : this.add.image(localX, localY, tex.key);
+
+        if (!spr) return null;
+
+        if (this._level && this._level._applyVisualProps) {
+            this._level._applyVisualProps(this, spr, frame, previewObj, colorData);
+        }
+
+        if (extra.blendMode !== undefined) {
+            spr.setBlendMode(extra.blendMode);
+        }
+
+        if (extra.tint !== undefined) {
+            spr.setTint(extra.tint);
+        }
+
+        if (extra.rotationOffset !== undefined) {
+            spr.rotation += extra.rotationOffset;
+        }
+
+        spr._editorPreviewDepth = previewDepth;
+        sprites.push(spr);
+
+        return spr;
+    };
+
+    const isPortalFront =
+        (objectDef.type === portalType || objectDef.type === speedType) &&
+        frameName.includes("_front_");
+
+    let portalBackSprite = null;
+
+    if (isPortalFront) {
+        const backFrame = frameName.replace("_front_", "_back_");
+        if (this._getTextureRefForFrameThingy(backFrame)) {
+            portalBackSprite = addPreviewSprite(backFrame, 0, 0, null, -0.005);
+        }
+    }
+
+    let glowSprite = null;
+
+    if (
+        false &&
+        objectDef.glow &&
+        this._level &&
+        this._level._getGlowFrameName
+    ) {
+        const glowFrame = this._level._getGlowFrameName(frameName);
+
+        if (glowFrame && this._getTextureRefForFrameThingy(glowFrame)) {
+            glowSprite = addPreviewSprite(glowFrame, 0, 0, null, -0.003, {
+                blendMode: S
+            });
+        }
+    }
+
+    const visualDef = isPortalFront
+        ? {
+            ...objectDef,
+            _portalFront: true
+        }
+        : objectDef;
+
+    const mainSprite = addPreviewSprite(frameName, 0, 0, visualDef, 0);
+
+    if (mainSprite && portalBackSprite) {
+        portalBackSprite.x = mainSprite.x;
+        portalBackSprite.y = mainSprite.y;
+    }
+
+    if (objectDef.type === ringType) {
+        if (mainSprite) mainSprite.setScale(0.75);
+        if (glowSprite) glowSprite.setScale(0.75);
+    }
+
+    if (frameName.indexOf("sawblade") >= 0 && mainSprite) {
+        mainSprite.setTint(0x000000);
+
+        const sawMirror = addPreviewSprite(frameName, 0, 0, objectDef, 0.001, {
+            tint: 0x000000,
+            rotationOffset: Math.PI
+        });
+
+        if (sawMirror) {
+            sawMirror.x = mainSprite.x;
+            sawMirror.y = mainSprite.y;
+        }
+    }
+
+    if (objectDef.type === solidType || objectDef.type === hazardType) {
+        const overlayFrame = frameName.replace("_001.png", "_2_001.png");
+
+        if (this._getTextureRefForFrameThingy(overlayFrame)) {
+            addPreviewSprite(overlayFrame, 0, 0, null, 0.002);
+        }
+    }
+
+    if (objectDef.children) {
+        for (const childDef of objectDef.children) {
+            let childDx = childDef.dx || 0;
+            let childDy = childDef.dy || 0;
+
+            if (childDef.localDx !== undefined || childDef.localDy !== undefined) {
+                let localDx = childDef.localDx || 0;
+                let localDy = childDef.localDy || 0;
+
+                if (previewObj.flipX) localDx = -localDx;
+                if (previewObj.flipY) localDy = -localDy;
+
+                const rot = (previewObj.rot || 0) * Math.PI / 180;
+
+                childDx = localDx * Math.cos(rot) - localDy * Math.sin(rot);
+                childDy = localDx * Math.sin(rot) + localDy * Math.cos(rot);
+            }
+
+            const childDepth =
+                (childDef.z !== undefined ? childDef.z : -1) < 0
+                    ? -0.003
+                    : 0.001;
+
+            const childSprite = addPreviewSprite(
+                childDef.frame,
+                childDx,
+                childDy,
+                childDef,
+                childDepth
+            );
+
+            if (childSprite && childDef.audioScale) {
+                childSprite.setScale(0.1);
+                childSprite.setAlpha(0.9);
+            }
+
+            if (frameName.indexOf("sawblade") >= 0 && childSprite) {
+                childSprite.setTint(0x000000);
+
+                const childMirror = addPreviewSprite(
+                    childDef.frame,
+                    childDx,
+                    childDy,
+                    childDef,
+                    childDepth + 0.001,
+                    {
+                        tint: 0x000000,
+                        rotationOffset: Math.PI
+                    }
+                );
+
+                if (childMirror) {
+                    childMirror.x = childSprite.x;
+                    childMirror.y = childSprite.y;
+                }
+            }
+        }
+    }
+
+    if (!sprites.length) {
+        this._uhdPreviewIcons = false;
+        preview.destroy();
+        return null;
+    }
+
+    sprites.sort((a, b) => {
+        return (a._editorPreviewDepth || 0) - (b._editorPreviewDepth || 0);
+    });
+
+    preview.add(sprites);
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    for (const spr of sprites) {
+        const displayW = spr.displayWidth || spr.width || 1;
+        const displayH = spr.displayHeight || spr.height || 1;
+
+        const left = spr.x - displayW * spr.originX;
+        const right = spr.x + displayW * (1 - spr.originX);
+        const top = spr.y - displayH * spr.originY;
+        const bottom = spr.y + displayH * (1 - spr.originY);
+
+        minX = Math.min(minX, left);
+        maxX = Math.max(maxX, right);
+        minY = Math.min(minY, top);
+        maxY = Math.max(maxY, bottom);
+    }
+
+    const visualW = Math.max(1, maxX - minX);
+    const visualH = Math.max(1, maxY - minY);
+
+    const targetSize = 64;
+    const maxDim = Math.max(visualW, visualH);
+    const scaleMultiplier = targetSize / maxDim;
+
+    preview.setScale(Math.min(scaleMultiplier, 0.6));
+
+    this._uhdPreviewIcons = false;
+    return preview;
 };
 
 _buildObjectGrid = () => {
@@ -6119,24 +9456,16 @@ _buildObjectGrid = () => {
         const y = startY + (row * paddingY);
 
         if (item.type === "object") {
-            const btnBg = this.add.image(x, y, "GJ_GameSheet03", "GJ_checkOff_001.png")
-                .setScale(1.2)
-                .setInteractive();
-
-            const sheet = this._getSheetForFrameThingy(item.frame);
-            const icon = this.add.image(x, y, sheet, item.frame);
-
-            const targetSize = 64;
-            const maxDim = Math.max(icon.width, icon.height);
-            const scaleMultiplier = targetSize / maxDim;
-
-            icon.setScale(Math.min(scaleMultiplier, 0.6));
-
-            if (window.selectedObjId === item.id) btnBg.setTint(0x888888);
-
-            this._gridContainer.add([btnBg, icon]);
-
-            this._makeBouncyButton(btnBg, 1.2, () => {
+            const btnBg = this.add.image(x, y, "GJ_GameSheet03", "GJ_checkOff_001.png").setScale(1.2).setInteractive();
+            const icon = this._createEditorObjectButtonPreview(x, y, item.id);
+            if (window.selectedObjId === item.id) {
+                btnBg.setTint(0x888888);
+            }
+            this._gridContainer.add(btnBg);
+            if (icon) {
+                this._gridContainer.add(icon);
+            }
+            this._makeCompositeBouncyButton(btnBg, [btnBg, icon], 1.2, () => {
                 window.selectedObjId = item.id;
                 this._buildObjectGrid();
             });
@@ -6152,7 +9481,7 @@ _buildObjectGrid = () => {
 
             this._gridContainer.add([btn, icon]);
 
-            this._makeBouncyButton(btn, 0.92, () => {
+            this._makeCompositeBouncyButton(btn, [btn, icon], 0.92, () => {
                 if (item.subType === "move") {
                     this._moveObject(item.dx, item.dy);
                 } else if (item.subType === "rotate") {
@@ -6170,7 +9499,7 @@ _buildObjectGrid = () => {
 
             this._gridContainer.add([btnBg, icon]);
 
-            this._makeBouncyButton(btnBg, 1.2, () => {
+            this._makeCompositeBouncyButton(btnBg, [btnBg, icon], 1.2, () => {
                 this._deleteSelectedObject();
             });
 
@@ -6180,22 +9509,26 @@ _buildObjectGrid = () => {
 };
 
 _moveObject = (dx, dy) => {
-    const selectedIndex = window.editorSelectedObject;
-    if (selectedIndex === -1) return;
+    const selectedObjectId = window.editorSelectedObject;
+    if (selectedObjectId === -1) return;
 
-    const collider = this._level.objects[selectedIndex];
-    const sprites = this._level.objectSprites[selectedIndex];
-    const saveObj = window.levelObjects[selectedIndex];
+    const sprites = this._level.objectSprites[selectedObjectId];
+    const saveObj = this._getEditorSaveObjectForObjectId(selectedObjectId);
+    const colliders = this._getEditorCollidersForObjectId(selectedObjectId);
 
     if (!saveObj) return;
 
-    if (collider) {
-      collider.x += dx; collider.y += dy;
-      collider._baseX += dx; collider._baseY += dy;
-      collider._origBaseX += dx; collider._origBaseY += dy;
+    for (const collider of colliders) {
+        collider.x += dx;
+        collider.y += dy;
+        collider._baseX = (collider._baseX ?? collider.x - dx) + dx;
+        collider._baseY = (collider._baseY ?? collider.y - dy) + dy;
+        collider._origBaseX = (collider._origBaseX ?? collider.x - dx) + dx;
+        collider._origBaseY = (collider._origBaseY ?? collider.y - dy) + dy;
     }
 
-    saveObj.x += dx / 2; saveObj.y -= dy / 2;
+    saveObj.x += dx / 2;
+    saveObj.y -= dy / 2;
     if (saveObj._raw) {
         saveObj._raw["2"] = String(saveObj.x);
         saveObj._raw["3"] = String(saveObj.y);
@@ -6204,61 +9537,87 @@ _moveObject = (dx, dy) => {
     if (sprites) {
         for (const s of sprites) {
             if (!s) continue;
-            s.x += dx; s.y += dy;
+            s.x += dx;
+            s.y += dy;
             if (s._eeWorldX !== undefined) s._eeWorldX += dx;
             if (s._eeBaseY !== undefined) s._eeBaseY += dy;
             if (s._origWorldX !== undefined) s._origWorldX += dx;
             if (s._origBaseY !== undefined) s._origBaseY += dy;
         }
     }
+
+    this._refreshEditorCollisionCaches();
 };
 
 _rotateObject = (degrees) => {
-    const selectedIndex = window.editorSelectedObject;
-    if (selectedIndex === -1) return;
+    const selectedObjectId = window.editorSelectedObject;
+    if (selectedObjectId === -1) return;
 
-    const collider = this._level.objects[selectedIndex];
-    const sprites = this._level.objectSprites[selectedIndex];
-    const saveObj = window.levelObjects[selectedIndex];
+    const sprites = this._level.objectSprites[selectedObjectId];
+    const saveObj = this._getEditorSaveObjectForObjectId(selectedObjectId);
+    const colliders = this._getEditorCollidersForObjectId(selectedObjectId);
 
     if (!saveObj) return;
 
     saveObj.rot = (saveObj.rot || 0) + degrees;
-    
+
     if (saveObj._raw) {
         saveObj._raw["6"] = String(saveObj.rot);
     }
 
-    if (collider) {
+    for (const collider of colliders) {
         collider.rotation = saveObj.rot;
+        collider.rotationDegrees = saveObj.rot;
     }
 
     if (sprites) {
         for (const s of sprites) {
             if (!s) continue;
-            s.angle += degrees; 
+            s.angle += degrees;
         }
     }
+
+    // Pads re-seat against the cell wall their base now faces (like real GD):
+    // rot 0 = bottom, 90 = left wall, 180 = top, 270 = right wall
+    const _rotDef = getObjectFromId(saveObj.id);
+    if (_rotDef && _rotDef.type === "pad") {
+        const _off = 15 - (_rotDef.gridH || 0.2) * 15;
+        const _seat = (r) => {
+            r = ((r % 360) + 360) % 360;
+            if (r === 90) return { x: -_off, y: 0 };
+            if (r === 180) return { x: 0, y: _off };
+            if (r === 270) return { x: _off, y: 0 };
+            return { x: 0, y: -_off };
+        };
+        const _prev = _seat(saveObj.rot - degrees);
+        const _next = _seat(saveObj.rot);
+        const _dxPx = (_next.x - _prev.x) * 2;
+        const _dyPx = -(_next.y - _prev.y) * 2;
+        if (_dxPx || _dyPx) this._moveObject(_dxPx, _dyPx);
+    }
+
+    this._refreshEditorCollisionCaches();
 };
 
 _flipObject = (axis) => {
-    const selectedIndex = window.editorSelectedObject;
-    if (selectedIndex === -1) return;
+    const selectedObjectId = window.editorSelectedObject;
+    if (selectedObjectId === -1) return;
 
-    const sprites = this._level.objectSprites[selectedIndex];
-    const saveObj = window.levelObjects[selectedIndex];
+    const sprites = this._level.objectSprites[selectedObjectId];
+    const saveObj = this._getEditorSaveObjectForObjectId(selectedObjectId);
+    const colliders = this._getEditorCollidersForObjectId(selectedObjectId);
 
     if (!saveObj) return;
 
     if (axis === "x") {
         saveObj.flipX = !saveObj.flipX;
         if (saveObj._raw) saveObj._raw["4"] = saveObj.flipX ? "1" : "0";
-        
+
         if (sprites) {
             for (const s of sprites) {
                 if (!s) continue;
                 s.setFlipX(!s.flipX);
-                s.angle = -s.angle; 
+                s.angle = -s.angle;
             }
         }
     } else {
@@ -6272,8 +9631,19 @@ _flipObject = (axis) => {
                 s.angle = -s.angle;
             }
         }
+
+        for (const collider of colliders) {
+            collider.flipY = saveObj.flipY;
+        }
     }
+
     saveObj.rot = -saveObj.rot;
+    if (saveObj._raw) saveObj._raw["6"] = String(saveObj.rot || 0);
+    for (const collider of colliders) {
+        collider.rotation = saveObj.rot;
+        collider.rotationDegrees = saveObj.rot;
+    }
+    this._refreshEditorCollisionCaches();
 };
 
 _clearEditorSelection = () => {
@@ -6323,19 +9693,25 @@ _selectEditorObjectByIndex = (index) => {
 };
 
 _duplicateSelectedObject = () => {
-    const selectedIndex = window.editorSelectedObject;
-    if (selectedIndex === -1) return;
+    const selectedObjectId = window.editorSelectedObject;
+    if (selectedObjectId === -1) return;
 
-    const src = window.levelObjects[selectedIndex];
-    if (!src) return;
+    const src = this._getEditorSaveObjectForObjectId(selectedObjectId);
+    if (!src) {
+        this._clearEditorSelection();
+        return;
+    }
 
     const clone = JSON.parse(JSON.stringify(src));
+    delete clone._eeObjectId;
 
     window.levelObjects.push(clone);
     this._level._spawnObject(clone);
 
-    const newIndex = this._level.objects.length - 1;
-    const newestSprites = this._level.objectSprites[newIndex];
+    const newObjectId = Number.isInteger(clone._eeObjectId)
+        ? clone._eeObjectId
+        : Math.max(0, (this._level._nextObjectId || 1) - 1);
+    const newestSprites = this._level.objectSprites[newObjectId];
 
     if (newestSprites && newestSprites.length) {
         const depthBase = {
@@ -6356,43 +9732,51 @@ _duplicateSelectedObject = () => {
 
             spr.setDepth((spr._eeZDepth || finalDepth) + 10);
 
-            if (this._level.container && !this._level.container.exists(spr)) {
+            if (spr._eeLayer === 2) {
+                if (this._level.topContainer && !this._level.topContainer.exists(spr)) {
+                    this._level.topContainer.add(spr);
+                }
+            } else if (this._level.container && !this._level.container.exists(spr)) {
                 this._level.container.add(spr);
             }
         }
     }
 
-    this._selectEditorObjectByIndex(newIndex);
+    this._selectEditorObjectByIndex(newObjectId);
+    this._refreshEditorCollisionCaches();
     this._buildObjectGrid();
 };
 
 _deleteSelectedObject = () => {
-    const selectedIndex = window.editorSelectedObject;
-    if (selectedIndex === -1) return;
+    const selectedObjectId = window.editorSelectedObject;
+    if (selectedObjectId === -1) return;
+
+    const saveIndex = this._getEditorSaveIndexForObjectId(selectedObjectId);
 
     this._clearEditorSelection();
 
-    const sprites = this._level.objectSprites[selectedIndex] || [];
+    const sprites = this._level.objectSprites[selectedObjectId] || [];
     for (const spr of sprites) {
         if (spr && spr.destroy) spr.destroy();
     }
 
-    const collider = this._level.objects[selectedIndex];
-    if (collider && collider.destroy) collider.destroy();
-
-    this._level.objectSprites.splice(selectedIndex, 1);
-    this._level.objects.splice(selectedIndex, 1);
-    window.levelObjects.splice(selectedIndex, 1);
-
-    for (let i = selectedIndex; i < this._level.objectSprites.length; i++) {
-        const list = this._level.objectSprites[i];
-        if (!list || !list.length) continue;
-
-        for (const spr of list) {
-            if (spr) spr._eeObjectId = i;
-        }
+    if (Array.isArray(this._level.objectSprites)) {
+        this._level.objectSprites[selectedObjectId] = null;
     }
 
+    if (Array.isArray(this._level.objects)) {
+        this._level.objects = this._level.objects.filter(collider => {
+            if (!collider) return false;
+            const objectId = Number.isInteger(collider._eeObjectId) ? collider._eeObjectId : -1;
+            return objectId !== selectedObjectId;
+        });
+    }
+
+    if (Array.isArray(window.levelObjects) && saveIndex !== -1) {
+        window.levelObjects[saveIndex] = null;
+    }
+
+    this._refreshEditorCollisionCaches();
     this._buildObjectGrid();
     this._updateEditorActionButtons();
 };
@@ -6466,14 +9850,32 @@ _updateEditorGrid = () => {
     if (startLineX >= -50 && startLineX <= screenWidth + 50) {
         g.lineBetween(startLineX, 0, startLineX, screenHeight);
     }
-    const worldGroundY = -20 + (60 * 8);
+    let worldGroundY = -20 + (60 * 8);
+    if (this._editorPlaytestActive && this._level?.getFloorY) {
+        const floorY = this._level.getFloorY();
+        if (floorY !== null && floorY !== undefined && Number.isFinite(floorY)) {
+            worldGroundY = b(floorY);
+        }
+    }
     const groundLineY = (worldGroundY * zoom) - this._cameraY;
     if (groundLineY >= -50 && groundLineY <= screenHeight + 50) {
         g.lineBetween(0, groundLineY, screenWidth, groundLineY);
     }
+
+    if (this._editorPlaytestActive && this._level?.getCeilingY) {
+        const ceilingY = this._level.getCeilingY();
+        if (ceilingY !== null && ceilingY !== undefined) {
+            const ceilingLineY = (b(ceilingY) * zoom) - this._cameraY;
+            if (ceilingLineY >= -50 && ceilingLineY <= screenHeight + 50) {
+                g.lineBetween(0, ceilingLineY, screenWidth, ceilingLineY);
+            }
+        }
+    }
 };
 
 _editorAction = () => {
+  if (this._editorPlaytestActive && !this._editorPlaytestPaused) return;
+
   if (this._editorTab === "build") {
     this._placeObject();
   } else if (this._editorTab === "edit") {
@@ -6493,12 +9895,18 @@ _placeObject = () => {
     const snapY = Math.floor((worldY + 20) / 60) * 60;
 
     const transformedX = (snapX / 2) + 15;
-    const transformedY = -(snapY / 2) + 225;
+    let transformedY = -(snapY / 2) + 225;
 
     const objId = window.selectedObjId;
     const objectDef = getObjectFromId(objId);
 
     if (!objectDef) return;
+
+    // Pads sit flush against the cell's bottom edge like real GD, not centered
+    // (rotating one re-seats it against the matching cell wall — see _rotateObject)
+    if (objectDef.type === "pad") {
+        transformedY -= 15 - (objectDef.gridH || 0.2) * 15;
+    }
 
     const saveData = {
         id: objId,
@@ -6542,10 +9950,21 @@ _placeObject = () => {
     window.levelObjects.push(saveData);
     this._level._spawnObject(saveData);
 
-    const placedIndex = this._level.objectSprites.length - 1;
+    // teleport portal pairing
+    if (objId === 747) {
+        const outData = JSON.parse(JSON.stringify(saveData));
+        outData.id = 749;
+        outData._raw["1"] = "749";
+        window.levelObjects.push(outData);
+        this._level._spawnObject(outData);
+        const outIndex = this._level.objectSprites.length - 1;
+        this._selectEditorObjectByIndex(outIndex);
+    }
+
+    const placedIndex = Math.max(0, (this._level._nextObjectId || 1) - 1);
     const newestSprites = this._level.objectSprites[placedIndex];
 
-    if (newestSprites && newestSprites.sprites) {
+    if (newestSprites && newestSprites.length) {
         const depthBase = {
             "-3": -6,
             "-1": -3,
@@ -6559,7 +9978,7 @@ _placeObject = () => {
             (depthBase[saveData.zLayer] || 0) +
             (saveData.zOrder * 0.01);
 
-        for (const spr of newestSprites.sprites) {
+        for (const spr of newestSprites) {
             if (!spr) continue;
 
             spr.setDepth((spr._eeZDepth || finalDepth) + 10);
@@ -6708,41 +10127,2586 @@ _deleteObjectAtPointer = () => {
 
     if (foundObjectIndex === -1) return;
 
+    const saveIndex = this._getEditorSaveIndexForObjectId(foundObjectIndex);
+
     if (window.editorSelectedObject === foundObjectIndex) {
         this._clearEditorSelection();
     }
 
-    const linkedSprites = this._level.objectSprites[foundObjectIndex];
-    const collider = this._level.objects[foundObjectIndex];
+    const linkedSprites = this._level.objectSprites[foundObjectIndex] || [];
 
-    if (linkedSprites && linkedSprites.length) {
-        for (const spr of linkedSprites) {
-            if (spr && spr.destroy) spr.destroy();
-        }
+    for (const spr of linkedSprites) {
+        if (spr && spr.destroy) spr.destroy();
     }
 
-    if (collider && collider.destroy) {
-        collider.destroy();
+    if (Array.isArray(this._level.objectSprites)) {
+        this._level.objectSprites[foundObjectIndex] = null;
     }
 
-    this._level.objectSprites.splice(foundObjectIndex, 1);
-    this._level.objects.splice(foundObjectIndex, 1);
-    window.levelObjects.splice(foundObjectIndex, 1);
-
-    for (let i = foundObjectIndex; i < this._level.objectSprites.length; i++) {
-        const list = this._level.objectSprites[i];
-        if (!list || !list.length) continue;
-
-        for (const spr of list) {
-            if (spr) spr._eeObjectId = i;
-        }
+    if (Array.isArray(this._level.objects)) {
+        this._level.objects = this._level.objects.filter(collider => {
+            if (!collider) return false;
+            const objectId = Number.isInteger(collider._eeObjectId) ? collider._eeObjectId : -1;
+            return objectId !== foundObjectIndex;
+        });
     }
 
+    if (Array.isArray(window.levelObjects) && saveIndex !== -1) {
+        window.levelObjects[saveIndex] = null;
+    }
+
+    this._refreshEditorCollisionCaches();
     window.editorSelectedObject = -1;
     this._updateEditorActionButtons();
 };
 
+_closeEditorLevelSettingsPopup = () => {
+    this._editorTextInputFocused = false;
+
+    if (!this._editorLevelSettingsPopup) return;
+
+    this._closeEditorHorizontalOptionPopup();
+    this._closeEditorColorPickerPopup();
+
+    if (this._editorLevelSettingsKeyHandler) {
+        window.removeEventListener("keydown", this._editorLevelSettingsKeyHandler);
+        this._editorLevelSettingsKeyHandler = null;
+    }
+
+    this._editorLevelSettingsPopup.destroy();
+    this._editorLevelSettingsPopup = null;
+};
+
+_closeEditorHorizontalOptionPopup = () => {
+    if (!this._editorHorizontalOptionPopup) return;
+
+    this._editorHorizontalOptionPopup.destroy();
+    this._editorHorizontalOptionPopup = null;
+};
+
+_closeEditorColorPickerPopup = () => {
+    this._editorTextInputFocused = false;
+
+    if (this._editorColorPickerKeyHandler) {
+        window.removeEventListener("keydown", this._editorColorPickerKeyHandler);
+        this._editorColorPickerKeyHandler = null;
+    }
+
+    if (!this._editorColorPickerPopup) return;
+
+    this._editorColorPickerPopup.destroy();
+    this._editorColorPickerPopup = null;
+};
+
+_editorSettingsToMap = () => {
+    const map = {};
+
+    const raw = window.settingslist || "";
+    const parts = String(raw).split(",");
+
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+        map[parts[i]] = parts[i + 1];
+    }
+
+    window.settingsMap = window.settingsMap || {};
+
+    for (const key in window.settingsMap) {
+        if (map[key] === undefined) {
+            map[key] = window.settingsMap[key];
+        }
+    }
+
+    return map;
+};
+
+_editorMapToSettings = (map) => {
+    const parts = [];
+
+    for (const key in map) {
+        if (map[key] === undefined || map[key] === null) continue;
+        parts.push(key, String(map[key]));
+    }
+
+    window.settingsMap = map;
+    window.settingslist = parts.join(",");
+
+    return window.settingslist;
+};
+
+_makeColorStringEntry = (channelId, color) => {
+    return [
+        "1", String(color.r),
+        "2", String(color.g),
+        "3", String(color.b),
+        "6", String(channelId),
+        "5", "0",
+        "7", "0"
+    ].join("_");
+};
+
+_parseColorStringEntry = (entry) => {
+    const props = {};
+    const parts = String(entry || "").split("_");
+
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+        props[parts[i]] = parts[i + 1];
+    }
+
+    return {
+        channel: parseInt(props["6"] || "0", 10),
+        r: parseInt(props["1"] || "255", 10),
+        g: parseInt(props["2"] || "255", 10),
+        b: parseInt(props["3"] || "255", 10)
+    };
+};
+
+_getEditorColorChannel = (channelId, fallback = { r: 255, g: 255, b: 255 }) => {
+    const map = this._editorSettingsToMap();
+
+    if (map["kS38"]) {
+        const entries = map["kS38"].split("|").filter(Boolean);
+
+        for (const entry of entries) {
+            const parsed = this._parseColorStringEntry(entry);
+
+            if (parsed.channel === channelId) {
+                return {
+                    r: parsed.r,
+                    g: parsed.g,
+                    b: parsed.b
+                };
+            }
+        }
+    }
+
+    const legacyKey =
+        channelId === 1000
+            ? "kS29"
+            : channelId === 1001
+                ? "kS30"
+                : null;
+
+    if (legacyKey && map[legacyKey]) {
+        const parsed = this._parseColorStringEntry(map[legacyKey]);
+
+        return {
+            r: parsed.r,
+            g: parsed.g,
+            b: parsed.b
+        };
+    }
+
+    return fallback;
+};
+
+_setEditorColorChannelDraft = (channelId, color) => {
+    const map = this._editorSettingsToMap();
+
+    const entries = map["kS38"]
+        ? map["kS38"].split("|").filter(Boolean)
+        : [];
+
+    let replaced = false;
+
+    for (let i = 0; i < entries.length; i++) {
+        const parsed = this._parseColorStringEntry(entries[i]);
+
+        if (parsed.channel === channelId) {
+            entries[i] = this._makeColorStringEntry(channelId, color);
+            replaced = true;
+            break;
+        }
+    }
+
+    if (!replaced) {
+        entries.push(this._makeColorStringEntry(channelId, color));
+    }
+
+    map["kS38"] = entries.join("|");
+
+    if (channelId === 1000) {
+        map["kS29"] = this._makeColorStringEntry(1000, color);
+    } else if (channelId === 1001) {
+        map["kS30"] = this._makeColorStringEntry(1001, color);
+    }
+
+    this._editorMapToSettings(map);
+
+    if (this._level) {
+        this._level._initialColors = this._level._initialColors || {};
+        this._level._initialColors[channelId] = color;
+    }
+
+    if (this._colorManager && this._colorManager.setInitialColor) {
+        this._colorManager.setInitialColor(channelId, color);
+    }
+
+    const hex = Phaser.Display.Color.GetColor(color.r, color.g, color.b);
+
+    if (channelId === 1000 && this._bg) {
+        this._bg.setTint(hex);
+    }
+
+    if (channelId === 1001 && this._level && this._level.setGroundColor) {
+        this._level.setGroundColor(hex);
+    }
+};
+
+_setEditorStartValueDraft = (key, value) => {
+    const map = this._editorSettingsToMap();
+    map[key] = String(value);
+    this._editorMapToSettings(map);
+};
+
+_getEditorStartValue = (key, fallback = 0) => {
+    const map = this._editorSettingsToMap();
+    const val = parseInt(map[key] ?? fallback, 10);
+
+    return isNaN(val) ? fallback : val;
+};
+
+_setEditorArtValueDraft = (key, value) => {
+    const numericValue = Math.max(0, parseInt(value ?? 0, 10) || 0);
+
+    this._setEditorStartValueDraft(key, numericValue);
+
+    if (key === "kA6") {
+        window._backgroundId = String(numericValue + 1).padStart(2, "0");
+
+        const bgKey = "game_bg_" + numericValue;
+
+        if (this._bg && this.textures.exists(bgKey)) {
+            this._bg.setTexture(bgKey);
+            const newBgH = this.textures.get(bgKey).source?.[0]?.height;
+
+            if (newBgH) {
+                this._bgInitY = newBgH - screenHeight - o;
+            }
+        }
+    } else if (key === "kA7") {
+        window._groundId = String(numericValue).padStart(2, "0");
+
+        if (this._level && typeof this._level.applyGroundTexture === "function") {
+            this._level.applyGroundTexture();
+        }
+    }
+};
+
+_getCurrentEditorLevelRecord = () => {
+    const levels = JSON.parse(localStorage.getItem("created_levels") || "[]");
+    const idx = levels.findIndex(l => l.createdId === window.currentlevel?.[2]);
+
+    return {
+        levels,
+        idx,
+        level: idx !== -1 ? levels[idx] : null
+    };
+};
+
+_setEditorSongDraft = (songId, songName) => {
+    this._editorPendingSongId = songId;
+    this._editorPendingSongName = songName;
+
+    window.currentlevel = window.currentlevel || [
+        "Placeholder",
+        "Unnamed",
+        window._onlineLevelId || "local_0",
+        ["Local", "SongAuthor"]
+    ];
+
+    if (songId < 0) {
+        const normalIndex = Math.abs(songId) - 1;
+        const levelSong = window.allLevels?.[normalIndex];
+
+        if (levelSong) {
+            window.currentlevel[0] = levelSong[0];
+            window.currentlevel[3] = ["Local", levelSong[3]];
+        }
+    } else {
+        window.currentlevel[0] = `ng_song_${songId}`;
+        window.currentlevel[3] = ["Local", "Newgrounds"];
+        window._onlineSongBuffer = null;
+        window._onlineSongKey = null;
+        window._onlineSongTitle = `NG#${songId}`;
+        window._onlineSongArtist = "Newgrounds";
+    }
+};
+
+_addSafeFrameImage = (x, y, frameName, scale = 1) => {
+    const tex =
+        this._getTextureRefForFrameThingy
+            ? this._getTextureRefForFrameThingy(frameName)
+            : null;
+
+    if (tex) {
+        return tex.frame
+            ? this.add.image(x, y, tex.key, tex.frame).setScale(scale)
+            : this.add.image(x, y, tex.key).setScale(scale);
+    }
+
+    return this.add.bitmapText(x, y, "bigFont", "?", 36)
+        .setOrigin(0.5)
+        .setScale(scale);
+};
+
+_getColourPickerFrameData = () => {
+    return {
+        "colourPicker.png": {
+            frame: { x: 1, y: 1591, w: 52, h: 52 },
+            rotated: false,
+            sourceSize: { w: 52, h: 52 }
+        },
+        "colourPickerBackground.png": {
+            frame: { x: 698, y: 325, w: 440, h: 440 },
+            rotated: false,
+            sourceSize: { w: 440, h: 440 }
+        },
+        "colourPickerOverlay.png": {
+            frame: { x: 698, y: 766, w: 440, h: 440 },
+            rotated: false,
+            sourceSize: { w: 440, h: 440 }
+        },
+        "colourPickerShadow.png": {
+            frame: { x: 602, y: 1207, w: 440, h: 440 },
+            rotated: false,
+            sourceSize: { w: 440, h: 440 }
+        },
+        "huePickerBackground.png": {
+            frame: { x: 1, y: 990, w: 600, h: 600 },
+            rotated: false,
+            sourceSize: { w: 600, h: 600 }
+        },
+        "menuColourPanelBackground.png": {
+            frame: { x: 1, y: 325, w: 696, h: 664 },
+            rotated: false,
+            sourceSize: { w: 720, h: 664 },
+            spriteSourceSize: { x: 24, y: 0, w: 696, h: 664 }
+        }
+    };
+};
+
+_getColourPickerTextureRef = (frameName) => {
+    const sheet = "CCControlColourPickerSpriteSheet-uhd";
+
+    if (
+        this.textures.exists(sheet) &&
+        this.textures.get(sheet).has(frameName)
+    ) {
+        return {
+            key: sheet,
+            frame: frameName
+        };
+    }
+
+    const generatedKey = `__cc_picker_${frameName}`;
+
+    if (this.textures.exists(generatedKey)) {
+        return {
+            key: generatedKey,
+            frame: null
+        };
+    }
+
+    if (!this.textures.exists(sheet)) {
+        return null;
+    }
+
+    const tex = this.textures.get(sheet);
+
+    const sourceImage =
+        typeof tex.getSourceImage === "function"
+            ? tex.getSourceImage()
+            : tex.source?.[0]?.image;
+
+    if (!sourceImage) {
+        return null;
+    }
+
+    const data = this._getColourPickerFrameData()[frameName];
+    if (!data) return null;
+
+    const frame = data.frame;
+    const outW = data.sourceSize.w;
+    const outH = data.sourceSize.h;
+
+    const canvasTexture = this.textures.createCanvas(generatedKey, outW, outH);
+    const canvas = canvasTexture.getCanvas();
+    const ctx = canvas.getContext("2d");
+
+    ctx.clearRect(0, 0, outW, outH);
+
+    if (data.rotated) {
+        ctx.save();
+        ctx.translate(outW / 2, outH / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.drawImage(
+            sourceImage,
+            frame.x,
+            frame.y,
+            frame.w,
+            frame.h,
+            -frame.w / 2,
+            -frame.h / 2,
+            frame.w,
+            frame.h
+        );
+        ctx.restore();
+    } else {
+        ctx.drawImage(
+            sourceImage,
+            frame.x,
+            frame.y,
+            frame.w,
+            frame.h,
+            0,
+            0,
+            outW,
+            outH
+        );
+    }
+
+    canvasTexture.refresh();
+
+    return {
+        key: generatedKey,
+        frame: null
+    };
+};
+
+_addColourPickerImage = (x, y, frameName, scale = 1) => {
+    const tex = this._getColourPickerTextureRef(frameName);
+
+    if (tex) {
+        return tex.frame
+            ? this.add.image(x, y, tex.key, tex.frame).setScale(scale)
+            : this.add.image(x, y, tex.key).setScale(scale);
+    }
+
+    return this.add.rectangle(x, y, 80 * scale, 80 * scale, 0xffffff, 0.4)
+        .setStrokeStyle(2, 0xff0000, 1);
+};
+
+_setPickerObjectColor = (obj, hex, alpha = 1) => {
+    if (!obj) return;
+
+    if (typeof obj.setTint === "function") {
+        obj.setTint(hex);
+        return;
+    }
+
+    if (typeof obj.setFillStyle === "function") {
+        obj.setFillStyle(hex, alpha);
+    }
+};
+
+_rgbToHsv = (r, g, b) => {
+    r /= 255;
+    g /= 255;
+    b /= 255;
+
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const d = max - min;
+
+    let h = 0;
+
+    if (d !== 0) {
+        if (max === r) {
+            h = ((g - b) / d) % 6;
+        } else if (max === g) {
+            h = ((b - r) / d) + 2;
+        } else {
+            h = ((r - g) / d) + 4;
+        }
+
+        h *= 60;
+
+        if (h < 0) h += 360;
+    }
+
+    const s = max === 0 ? 0 : d / max;
+    const v = max;
+
+    return { h, s, v };
+};
+
+_hsvToRgb = (h, s, v) => {
+    h = ((h % 360) + 360) % 360;
+
+    const c = v * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = v - c;
+
+    let r = 0;
+    let g = 0;
+    let b = 0;
+
+    if (h < 60) {
+        r = c;
+        g = x;
+    } else if (h < 120) {
+        r = x;
+        g = c;
+    } else if (h < 180) {
+        g = c;
+        b = x;
+    } else if (h < 240) {
+        g = x;
+        b = c;
+    } else if (h < 300) {
+        r = x;
+        b = c;
+    } else {
+        r = c;
+        b = x;
+    }
+
+    return {
+        r: Math.round((r + m) * 255),
+        g: Math.round((g + m) * 255),
+        b: Math.round((b + m) * 255)
+    };
+};
+
+_makeEditorOkButton = (parent, x, y, text, callback) => {
+    const btnW = 124;
+    const btnH = 62;
+    const btnBorder = this.textures.exists("GJ_button01") ? this.textures.get("GJ_button01").source[0].width * 0.3 : 28;
+
+    const grp = this.add.container(x, y);
+
+    const btn = this.add.nineslice(
+        0,
+        0,
+        "GJ_button01",
+        null,
+        btnW,
+        btnH,
+        btnBorder,
+        btnBorder,
+        btnBorder,
+        btnBorder
+    ).setOrigin(0.5);
+
+    const label = this.add.bitmapText(-5, -3, "goldFont", text, 42).setOrigin(0.5, 0.5);
+    const hitZone = this.add.zone(0, 0, btnW, btnH) .setInteractive();
+
+    grp.add([btn, label, hitZone]);
+    parent.add(grp);
+
+    const baseScale = 1;
+    const pressedScale = baseScale * 1.16;
+
+    hitZone.on("pointerdown", () => {
+        hitZone._pressed = true;
+        this.tweens.killTweensOf(grp, "scale");
+        this.tweens.add({
+            targets: grp,
+            scale: pressedScale,
+            duration: 300,
+            ease: "Bounce.Out"
+        });
+    });
+
+    const release = (runCallback = false) => {
+        if (!hitZone._pressed) return;
+
+        hitZone._pressed = false;
+        this.tweens.killTweensOf(grp, "scale");
+        this.tweens.add({
+            targets: grp,
+            scale: baseScale,
+            duration: 400,
+            ease: "Bounce.Out"
+        });
+
+        if (runCallback) {
+            callback?.();
+        }
+    };
+
+    hitZone.on("pointerup", () => release(true));
+    hitZone.on("pointerout", () => release(false));
+    hitZone.on("pointerupoutside", () => release(false));
+
+    return grp;
+};
+
+_makeEditorVisualHitButton = (parent, x, y, hitW, hitH, buildVisual, callback) => {
+    const root = this.add.container(x, y);
+    const visualRoot = this.add.container(0, 0);
+
+    const visual = buildVisual(visualRoot);
+
+    const hit = this.add.rectangle(0, 0, hitW, hitH, 0xffffff, 0.001)
+        .setOrigin(0.5)
+        .setInteractive();
+
+    root.add([visualRoot, hit]);
+    parent.add(root);
+
+    root._editorVisualBaseScale = visualRoot.scaleX || 1;
+
+    const getBaseScale = () => root._editorVisualBaseScale || visualRoot.scaleX || 1;
+
+    this._makeCompositeBouncyButton(
+        hit,
+        [{ target: visualRoot, getBaseScale }],
+        1,
+        () => {
+            callback?.();
+        }
+    );
+
+    return {
+        root,
+        hit,
+        visualRoot,
+        visual,
+        baseScale: getBaseScale(),
+        setBaseScale: (scale) => {
+            root._editorVisualBaseScale = scale;
+            visualRoot.setScale(scale);
+        }
+    };
+};
+
+_makeCurrentSpeedPreview = (parent, x, y, objectId, callback, targetHeight = 76, heightMultiplier = 1) => {
+    const objectDef = typeof getObjectFromId === "function" ? getObjectFromId(objectId) : null;
+    let frameName = objectDef?.frame || null;
+
+    if (objectDef?.randomFrames && objectDef.randomFrames.length) {
+        frameName = objectDef.randomFrames[0];
+    }
+
+    let icon = null;
+
+    if (frameName) {
+        icon = this._addSafeFrameImage(x, y, frameName, 1);
+    }
+
+    if (icon && typeof icon.setScale === "function") {
+        const rawHeight = icon.height || ((icon.displayHeight || 1) / (icon.scaleY || 1)) || 1;
+        let iconScale = (targetHeight * heightMultiplier) / rawHeight;
+
+        if (!Number.isFinite(iconScale) || iconScale <= 0) {
+            iconScale = 1;
+        }
+
+        icon.setScale(iconScale);
+        icon._bouncyBaseScale = iconScale;
+
+        if (typeof icon.setInteractive === "function") {
+            icon.setInteractive();
+        }
+
+        parent.add(icon);
+
+        this._makeBouncyButton(icon, iconScale, () => {
+            callback?.();
+        });
+
+        return {
+            root: icon,
+            hit: icon,
+            visualRoot: icon,
+            visual: icon,
+            baseScale: iconScale,
+            setBaseScale: (scale) => {
+                icon._bouncyBaseScale = scale;
+                icon.setScale(scale);
+            }
+        };
+    }
+
+    const fallback = this.add.bitmapText(x, y, "bigFont", "?", 42)
+        .setOrigin(0.5)
+        .setInteractive();
+
+    parent.add(fallback);
+
+    fallback._bouncyBaseScale = 1;
+
+    this._makeBouncyButton(fallback, 1, () => {
+        callback?.();
+    });
+
+    return {
+        root: fallback,
+        hit: fallback,
+        visualRoot: fallback,
+        visual: fallback,
+        baseScale: 1,
+        setBaseScale: (scale) => {
+            fallback._bouncyBaseScale = scale;
+            fallback.setScale(scale);
+        }
+    };
+};
+
+_makeGamemodeIconButton = (parent, x, y, modeDef, callback) => {
+    const iconScale = 0.88;
+    const icon = this._addSafeFrameImage(x, y, modeDef.frame, iconScale);
+
+    if (modeDef.rotateFlip) {
+        icon.setAngle(90);
+        icon.setFlipY(true);
+    }
+
+    if (typeof icon.setInteractive === "function") {
+        icon.setInteractive();
+    }
+
+    parent.add(icon);
+
+    this._makeBouncyButton(icon, iconScale, () => {
+        callback?.();
+    });
+
+    return {
+        root: icon,
+        hit: icon,
+        visualRoot: icon,
+        visual: icon,
+        baseScale: iconScale
+    };
+};
+
+_makeEditorAtlasIconButton = (parent, x, y, optionDef, callback, targetHeight = 58) => {
+    const icon = this._addSafeFrameImage(x, y, optionDef.frame, 1);
+
+    let iconScale = 1;
+    const rawHeight = icon.height || ((icon.displayHeight || 1) / (icon.scaleY || 1)) || 1;
+
+    if (rawHeight > 0) {
+        iconScale = targetHeight / rawHeight;
+    }
+
+    if (!Number.isFinite(iconScale) || iconScale <= 0) {
+        iconScale = 1;
+    }
+
+    if (typeof icon.setScale === "function") {
+        icon.setScale(iconScale);
+        icon._bouncyBaseScale = iconScale;
+    }
+
+    if (typeof icon.setInteractive === "function") {
+        icon.setInteractive();
+    }
+
+    parent.add(icon);
+
+    this._makeBouncyButton(icon, iconScale, () => {
+        callback?.();
+    });
+
+    return {
+        root: icon,
+        hit: icon,
+        visualRoot: icon,
+        visual: icon,
+        baseScale: iconScale,
+        setBaseScale: (scale) => {
+            icon._bouncyBaseScale = scale;
+            icon.setScale(scale);
+        }
+    };
+};
+
+_openEditorStartOptionsPopup = () => {
+    if (this._editorStartOptionsPopup) return;
+    this._uhdContext = 'editorStartOptions';
+
+    const sw = screenWidth;
+    const sh = screenHeight;
+    const panelW = 520;
+    const panelH = 420;
+
+    const root = this.add.container(0, 0).setScrollFactor(0).setDepth(2650);
+    this._editorStartOptionsPopup = root;
+
+    const blocker = this.add.rectangle(0, 0, sw, sh, 0x000000, 0.25)
+        .setOrigin(0)
+        .setInteractive();
+
+    root.add(blocker);
+
+    const inner = this.add.container(sw / 2, sh / 2 + 15)
+        .setScale(1);
+
+    root.add(inner);
+
+    const corner = this.textures.exists("GJ_square01") ? this.textures.get("GJ_square01").source[0].width * 0.325 : 24;
+
+    const panel = this._drawScale9(
+        0,
+        0,
+        panelW,
+        panelH,
+        "GJ_square01",
+        corner,
+        0xffffff,
+        1
+    );
+
+    inner.add(panel);
+
+    const closeBtn = this.add.image(
+        -(panelW / 2) + 10,
+        -(panelH / 2) + 10,
+        "GJ_GameSheet03",
+        "GJ_closeBtn_001.png"
+    )
+        .setScale(0.8)
+        .setInteractive();
+
+    inner.add(closeBtn);
+
+    this._makeBouncyButton(closeBtn, 0.8, () => {
+        this._closeEditorStartOptionsPopup();
+    });
+
+    const optionDefs = [
+        { label: "Mini Mode", key: "kA3" },
+        { label: "Flip Gravity", key: "kA11" },
+        { label: "Dual Mode", key: "kA8" },
+        { label: "Mirror Mode", key: "kA28" }
+    ];
+
+    const makeToggle = (label, key, y) => {
+        const row = this.add.container(-150, y);
+        const check = this.add.image(0, 0, "GJ_GameSheet03", "GJ_checkOff_001.png").setScale(0.9).setInteractive();
+        const text = this.add.bitmapText(48, -2, "bigFont", label, 28).setOrigin(0, 0.5).setInteractive();
+
+        row.add([check, text]);
+        inner.add(row);
+
+        const refresh = () => {
+            const checked = this._getEditorStartValue(key, 0) === 1;
+            check.setTexture(
+                "GJ_GameSheet03",
+                checked ? "GJ_checkOn_001.png" : "GJ_checkOff_001.png"
+            );
+        };
+
+        const toggle = () => {
+            const checked = this._getEditorStartValue(key, 0) === 1;
+            this._setEditorStartValueDraft(key, checked ? 0 : 1);
+            refresh();
+        };
+
+        this._makeBouncyButton(check, 0.9, toggle);
+        text.on("pointerdown", toggle);
+
+        refresh();
+
+        return row;
+    };
+
+    optionDefs.forEach((opt, i) => {
+        makeToggle(opt.label, opt.key, -130 + i * 80);
+    });
+};
+
+_applyLevelStartOptions = () => {
+    const getBool = (key) => parseInt(window.settingsMap?.[key] || "0", 10) === 1;
+
+    this._state.isMini = getBool("kA3");
+    this._state.gravityFlipped = getBool("kA11");
+    this._state.mirrored = getBool("kA28");
+
+    if (getBool("kA8")) {
+        this._enableDualMode();
+    }
+};
+
+_closeEditorStartOptionsPopup = () => {
+    if (this._editorStartOptionsPopup) {
+        this._editorStartOptionsPopup.destroy();
+        this._editorStartOptionsPopup = null;
+    }
+};
+
+_openEditorHorizontalOptionPopup = (titleText, options, selectedKey, onSelect, renderOption) => {
+    this._closeEditorHorizontalOptionPopup();
+
+    const sw = screenWidth;
+    const sh = screenHeight;
+    const isGamemodePopup = titleText === "Select Mode";
+    const isSpeedPopup = titleText === "Select Speed";
+    const isBgPopup = titleText === "Select Background";
+    const isGroundPopup = titleText === "Select Ground";
+    const isArtPopup = isBgPopup || isGroundPopup;
+
+    const root = this.add.container(0, 0).setScrollFactor(0).setDepth(2600);
+    this._editorHorizontalOptionPopup = root;
+
+    const blocker = this.add.rectangle(0, 0, sw, sh, 0x000000, 0.25).setOrigin(0).setInteractive();
+    root.add(blocker);
+
+    const optionCols = isArtPopup ? 10 : options.length;
+    const optionRows = isArtPopup ? Math.ceil(options.length / optionCols) : 1;
+
+    const optionGapX = isArtPopup ? 76 : (isGamemodePopup ? 84 : (isSpeedPopup ? 150 : 142));
+    const optionGapY = isArtPopup ? 68 : 0;
+
+    const panelW = isArtPopup ? 860 : 760;
+    const panelH = isArtPopup ? Math.min(650, 225 + optionRows * optionGapY) - 45 : 340;
+
+    const speedTargetHeight = 112;
+    const artGridYOffset = isArtPopup ? -20 : 0;
+
+    const inner = this.add.container(sw / 2, sh / 2 + 15).setScale(1);
+    root.add(inner);
+
+    const corner = this.textures.exists("GJ_square01")
+        ? this.textures.get("GJ_square01").source[0].width * 0.325
+        : 24;
+
+    const panel = this._drawScale9(0, 0, panelW, panelH, "GJ_square01", corner, 0xffffff, 1);
+    inner.add(panel);
+
+    const title = this.add.bitmapText(0, -(panelH / 2) + 50, "bigFont", titleText, isArtPopup ? 52 : 60).setOrigin(0.5);
+    inner.add(title);
+
+    let selected = selectedKey;
+    const optionObjects = [];
+
+    const setTintDeep = (obj, tint) => {
+        if (!obj) return;
+
+        if (tint === null) {
+            if (typeof obj.clearTint === "function") obj.clearTint();
+        } else if (typeof obj.setTint === "function") {
+            obj.setTint(tint);
+        }
+
+        if (Array.isArray(obj.list)) {
+            for (const child of obj.list) {
+                setTintDeep(child, tint);
+            }
+        }
+    };
+
+    const getVisualHeight = (obj) => {
+        if (!obj) return 0;
+
+        if (typeof obj.getBounds === "function") {
+            const bounds = obj.getBounds();
+            if (bounds && bounds.height > 0) {
+                return bounds.height;
+            }
+        }
+
+        if (obj.displayHeight > 0) return obj.displayHeight;
+        if (obj.height > 0) return obj.height * (obj.scaleY || 1);
+
+        return 0;
+    };
+
+    const refreshSelected = () => {
+        for (const entry of optionObjects) {
+            const isSelected = entry.key === selected;
+            const baseScale = entry.baseScale || 1;
+
+            entry.visualRoot.setScale(baseScale);
+            entry.visualRoot.setAlpha(1);
+            setTintDeep(entry.visualRoot, isSelected ? null : 0x666666);
+        }
+    };
+
+    options.forEach((opt, i) => {
+        const row = isArtPopup ? Math.floor(i / optionCols) : 0;
+        const col = isArtPopup ? (i % optionCols) : i;
+        const itemsInRow = isArtPopup ? Math.min(optionCols, options.length - row * optionCols) : options.length;
+
+        const ox = ((col - ((itemsInRow - 1) / 2)) * optionGapX) + (isSpeedPopup ? -15 : 0);
+        const oy = isArtPopup
+            ? (-(optionRows - 1) * optionGapY / 2) + row * optionGapY + 16 + artGridYOffset
+            : -2;
+
+        const buttonObj = renderOption(inner, opt, ox, oy, () => {
+            selected = opt.key;
+            onSelect(opt);
+            refreshSelected();
+        }, i);
+
+        const visualRoot = buttonObj.visualRoot || buttonObj.root;
+
+        let baseScale = buttonObj.baseScale || visualRoot.scaleX || 1;
+
+        if (isSpeedPopup) {
+            const currentHeight = getVisualHeight(visualRoot);
+
+            if (currentHeight > 0) {
+                const targetHeight = speedTargetHeight * (i === 0 ? 0.8 : 1);
+                baseScale = baseScale * (targetHeight / currentHeight);
+            }
+        }
+
+        if (buttonObj.setBaseScale) {
+            buttonObj.setBaseScale(baseScale);
+        } else {
+            visualRoot._bouncyBaseScale = baseScale;
+            visualRoot.setScale(baseScale);
+        }
+
+        optionObjects.push({
+            key: opt.key,
+            root: buttonObj.root,
+            visualRoot,
+            baseScale
+        });
+    });
+
+    this._makeEditorOkButton(inner, 0, (panelH / 2) - 52, "OK", () => {
+        this._closeEditorHorizontalOptionPopup();
+    });
+
+    refreshSelected();
+};
+
+_openEditorColorPickerPopup = (channelId, labelText, onColorChanged) => {
+    this._closeEditorColorPickerPopup();
+
+    const sw = screenWidth;
+    const sh = screenHeight;
+
+    const root = this.add.container(0, 0).setScrollFactor(0).setDepth(2700);
+    this._editorColorPickerPopup = root;
+
+    const blocker = this.add.rectangle(0, 0, sw, sh, 0x000000, 0.32).setOrigin(0).setInteractive();
+    root.add(blocker);
+
+    const panelW = 820;
+    const panelH = 520;
+
+    const inner = this.add.container(sw / 2, sh / 2).setScale(1);
+    root.add(inner);
+
+    const corner = this.textures.exists("GJ_square01") ? this.textures.get("GJ_square01").source[0].width * 0.325 : 24;
+    const panel = this._drawScale9(0, 0, panelW, panelH, "GJ_square01", corner, 0xffffff, 1);
+    inner.add(panel);
+
+    const title = this.add.bitmapText(0, -(panelH / 2) + 40, "goldFont", "Select Color", 34).setOrigin(0.5);
+    inner.add(title);
+
+    const currentColor = this._getEditorColorChannel(channelId);
+    const originalColor = {
+        r: currentColor.r,
+        g: currentColor.g,
+        b: currentColor.b
+    };
+    const currentHsv = this._rgbToHsv(currentColor.r, currentColor.g, currentColor.b);
+
+    const pickerX = 0;
+    const pickerY = 0;
+    const pickerScale = 0.42;
+    const hueRingInnerRadius = 94;
+    const hueRingOuterRadius = 126;
+    const shadowRadius = (220 * pickerScale) - 1;
+    const innerRadius = shadowRadius;
+
+    const startHueAngle = Phaser.Math.DegToRad(currentHsv.h - 90);
+
+    const state = {
+        h: currentHsv.h,
+
+        innerX: 0,
+        innerY: 0,
+
+        hueX: Math.cos(startHueAngle) * 110,
+        hueY: Math.sin(startHueAngle) * 110,
+
+        sampledColor: {
+            r: currentColor.r,
+            g: currentColor.g,
+            b: currentColor.b
+        }
+    };
+
+    let activePickerTarget = null;
+
+    const toHexNumber = (color) => {
+        return Phaser.Display.Color.GetColor(color.r, color.g, color.b);
+    };
+
+    const toHexString = (color) => {
+        const toPart = (v) => {
+            return Phaser.Math.Clamp(Math.round(v), 0, 255)
+                .toString(16)
+                .padStart(2, "0")
+                .toUpperCase();
+        };
+
+        return `${toPart(color.r)}${toPart(color.g)}${toPart(color.b)}`;
+    };
+
+    const normalizeColor = (color) => {
+        return {
+            r: Phaser.Math.Clamp(parseInt(color.r, 10) || 0, 0, 255),
+            g: Phaser.Math.Clamp(parseInt(color.g, 10) || 0, 0, 255),
+            b: Phaser.Math.Clamp(parseInt(color.b, 10) || 0, 0, 255)
+        };
+    };
+
+    const parseHexColor = (raw) => {
+        let value = String(raw || "")
+            .replace(/^#/, "")
+            .replace(/[^0-9a-fA-F]/g, "")
+            .toUpperCase();
+
+        if (value.length !== 6) return null;
+
+        return {
+            r: parseInt(value.slice(0, 2), 16),
+            g: parseInt(value.slice(2, 4), 16),
+            b: parseInt(value.slice(4, 6), 16)
+        };
+    };
+
+    const menuPanelBg = this._addColourPickerImage(
+        pickerX,
+        pickerY,
+        "menuColourPanelBackground.png",
+        pickerScale
+    );
+
+    if (menuPanelBg && typeof menuPanelBg.setFlipX === "function") {
+        menuPanelBg.setFlipX(true);
+    }
+
+    const hueBg = this._addColourPickerImage(
+        pickerX,
+        pickerY,
+        "huePickerBackground.png",
+        pickerScale
+    );
+
+    const innerCircleBg = this._addColourPickerImage(
+        pickerX,
+        pickerY,
+        "colourPickerBackground.png",
+        pickerScale
+    );
+
+    const selectedColorCircle = this.add.circle(
+        pickerX,
+        pickerY,
+        innerRadius,
+        0xffffff,
+        1
+    );
+
+    const innerShadow = this._addColourPickerImage(
+        pickerX,
+        pickerY,
+        "colourPickerShadow.png",
+        pickerScale
+    );
+
+    const innerOverlay = this._addColourPickerImage(
+        pickerX,
+        pickerY,
+        "colourPickerOverlay.png",
+        pickerScale
+    );
+
+    const hueHandle = this._addColourPickerImage(
+        pickerX,
+        pickerY,
+        "colourPicker.png",
+        pickerScale
+    );
+
+    const svHandle = this._addColourPickerImage(
+        pickerX,
+        pickerY,
+        "colourPicker.png",
+        pickerScale
+    );
+
+    const previewSize = 42;
+    const previewX = -(panelW / 2) + 46;
+    const previewY = -(panelH / 2) + 43;
+
+    const currentPreview = this.add.rectangle(
+        previewX,
+        previewY,
+        previewSize,
+        previewSize,
+        toHexNumber(currentColor),
+        1
+    );
+
+    const originalPreview = this.add.rectangle(
+        previewX,
+        previewY + previewSize,
+        previewSize,
+        previewSize,
+        toHexNumber(originalColor),
+        1
+    );
+
+    const inputState = {
+        focused: null,
+        values: {
+            r: String(currentColor.r),
+            g: String(currentColor.g),
+            b: String(currentColor.b),
+            hex: toHexString(currentColor)
+        },
+        fields: {}
+    };
+
+    const createInputField = (key, label, x, y, w, maxChars) => {
+        const labelObj = this.add.bitmapText(x, y - 37, "goldFont", label, 22).setOrigin(0.5).setAlpha(0.95);
+        const bg = this.add.rectangle(x, y, w, 34, 0x000000, 0.38).setOrigin(0.5).setInteractive();
+        const valueText = this.add.bitmapText(x, y, "bigFont", "", 20).setOrigin(0.5);
+        const hit = this.add.rectangle(x, y, w, 40, 0xffffff, 0.001).setOrigin(0.5).setInteractive();
+
+        inputState.fields[key] = {
+            key,
+            label,
+            bg,
+            valueText,
+            maxChars
+        };
+
+        hit.on("pointerdown", (pointer) => {
+            inputState.focused = key;
+            this._editorTextInputFocused = true;
+            renderInputFields();
+
+            if (pointer && pointer.event) {
+                pointer.event.preventDefault?.();
+                pointer.event.stopPropagation?.();
+                pointer.event.stopImmediatePropagation?.();
+            }
+        });
+
+        inner.add([labelObj, bg, valueText, hit]);
+    };
+
+    const inputLeftX = -(panelW / 2) + 60;
+    const rgbInputY = -34;
+    const rgbGap = 76;
+
+    createInputField("r", "R:", inputLeftX, rgbInputY, 68, 3);
+    createInputField("g", "G:", inputLeftX + rgbGap, rgbInputY, 68, 3);
+    createInputField("b", "B:", inputLeftX + (rgbGap * 2), rgbInputY, 68, 3);
+    createInputField("hex", "HEX:", inputLeftX + rgbGap, 50, 152, 6);
+
+    inner.add([
+        menuPanelBg,
+        hueBg,
+        innerCircleBg,
+        selectedColorCircle,
+        innerShadow,
+        innerOverlay,
+        hueHandle,
+        svHandle,
+        currentPreview,
+        originalPreview
+    ]);
+
+    const getTextureFrame = (frameName) => {
+        const ref = this._getColourPickerTextureRef(frameName);
+        if (!ref) return null;
+
+        const tex = this.textures.get(ref.key);
+        if (!tex) return null;
+
+        const frame =
+            typeof tex.get === "function"
+                ? tex.get(ref.frame || "__BASE")
+                : null;
+
+        if (!frame || !frame.source || !frame.source.image) {
+            return null;
+        }
+
+        return frame;
+    };
+
+    const drawFrameToCanvas = (ctx, frameName, destW, destH) => {
+        const frame = getTextureFrame(frameName);
+        if (!frame) return false;
+
+        const sourceImage = frame.source.image;
+
+        ctx.drawImage(
+            sourceImage,
+            frame.cutX,
+            frame.cutY,
+            frame.cutWidth,
+            frame.cutHeight,
+            0,
+            0,
+            destW,
+            destH
+        );
+
+        return true;
+    };
+
+    const colorDistanceSq = (a, b) => {
+        const dr = a.r - b.r;
+        const dg = a.g - b.g;
+        const db = a.b - b.b;
+
+        return dr * dr + dg * dg + db * db;
+    };
+
+    const hueDistance = (a, b) => {
+        let d = Math.abs(a - b) % 360;
+        if (d > 180) d = 360 - d;
+        return d;
+    };
+
+    const sampleSize = Math.ceil(440 * pickerScale);
+    const sampleRadius = sampleSize / 2;
+
+    const sampleCanvas = document.createElement("canvas");
+    sampleCanvas.width = sampleSize;
+    sampleCanvas.height = sampleSize;
+
+    const sampleCtx = sampleCanvas.getContext("2d", {
+        willReadFrequently: true
+    });
+
+    const hueSampleSize = Math.ceil(600 * pickerScale);
+    const hueSampleRadius = hueSampleSize / 2;
+
+    const hueSampleCanvas = document.createElement("canvas");
+    hueSampleCanvas.width = hueSampleSize;
+    hueSampleCanvas.height = hueSampleSize;
+
+    const hueSampleCtx = hueSampleCanvas.getContext("2d", {
+        willReadFrequently: true
+    });
+
+    let hueSampleReady = false;
+
+    const rebuildHueSampleCanvas = () => {
+        hueSampleCtx.clearRect(0, 0, hueSampleSize, hueSampleSize);
+
+        hueSampleReady = drawFrameToCanvas(
+            hueSampleCtx,
+            "huePickerBackground.png",
+            hueSampleSize,
+            hueSampleSize
+        );
+    };
+
+    const rebuildInnerSampleCanvas = () => {
+        const huePure = this._hsvToRgb(state.h, 1, 1);
+        const hueHex = Phaser.Display.Color.GetColor(huePure.r, huePure.g, huePure.b);
+
+        selectedColorCircle.setFillStyle(hueHex, 1);
+
+        sampleCtx.clearRect(0, 0, sampleSize, sampleSize);
+
+        drawFrameToCanvas(sampleCtx, "colourPickerBackground.png", sampleSize, sampleSize);
+
+        sampleCtx.save();
+        sampleCtx.globalCompositeOperation = "source-over";
+        sampleCtx.fillStyle = `rgb(${huePure.r}, ${huePure.g}, ${huePure.b})`;
+        sampleCtx.beginPath();
+        sampleCtx.arc(sampleRadius, sampleRadius, sampleRadius, 0, Math.PI * 2);
+        sampleCtx.fill();
+        sampleCtx.restore();
+
+        drawFrameToCanvas(sampleCtx, "colourPickerShadow.png", sampleSize, sampleSize);
+        drawFrameToCanvas(sampleCtx, "colourPickerOverlay.png", sampleSize, sampleSize);
+    };
+
+    const findHuePositionForLoadedColor = (targetColor) => {
+        if (!hueSampleReady) {
+            rebuildHueSampleCanvas();
+        }
+
+        const targetHsv = this._rgbToHsv(targetColor.r, targetColor.g, targetColor.b);
+        let best = null;
+
+        const fallbackAngle = Phaser.Math.DegToRad(targetHsv.h - 90);
+        const fallback = {
+            x: Math.cos(fallbackAngle) * ((hueRingInnerRadius + hueRingOuterRadius) / 2),
+            y: Math.sin(fallbackAngle) * ((hueRingInnerRadius + hueRingOuterRadius) / 2)
+        };
+
+        if (!hueSampleReady) {
+            return fallback;
+        }
+
+        for (let y = 0; y < hueSampleSize; y += 2) {
+            for (let x = 0; x < hueSampleSize; x += 2) {
+                const dx = x - hueSampleRadius;
+                const dy = y - hueSampleRadius;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < hueRingInnerRadius || dist > hueRingOuterRadius) continue;
+
+                const pixel = hueSampleCtx.getImageData(x, y, 1, 1).data;
+                if (pixel[3] < 12) continue;
+
+                const rgb = {
+                    r: pixel[0],
+                    g: pixel[1],
+                    b: pixel[2]
+                };
+
+                const hsv = this._rgbToHsv(rgb.r, rgb.g, rgb.b);
+                if (hsv.s < 0.08) continue;
+
+                const midRadius = (hueRingInnerRadius + hueRingOuterRadius) / 2;
+                const radiusPenalty = Math.abs(dist - midRadius) * 0.08;
+                const huePenalty = hueDistance(hsv.h, targetHsv.h);
+
+                const score = huePenalty + radiusPenalty;
+
+                if (!best || score < best.score) {
+                    best = {
+                        x: dx,
+                        y: dy,
+                        score
+                    };
+                }
+            }
+        }
+
+        return best || fallback;
+    };
+
+    const sampleHuePixel = () => {
+        if (!hueSampleReady) {
+            rebuildHueSampleCanvas();
+        }
+
+        const canvasX = Math.round(hueSampleRadius + state.hueX);
+        const canvasY = Math.round(hueSampleRadius + state.hueY);
+
+        const clampedX = Phaser.Math.Clamp(canvasX, 0, hueSampleSize - 1);
+        const clampedY = Phaser.Math.Clamp(canvasY, 0, hueSampleSize - 1);
+
+        const pixel = hueSampleCtx.getImageData(clampedX, clampedY, 1, 1).data;
+
+        const sampledRgb = {
+            r: pixel[0],
+            g: pixel[1],
+            b: pixel[2]
+        };
+
+        const sampledHsv = this._rgbToHsv(sampledRgb.r, sampledRgb.g, sampledRgb.b);
+
+        if (sampledHsv.s > 0.08) {
+            state.h = sampledHsv.h;
+        }
+
+        return sampledRgb;
+    };
+
+    const findInnerPositionForLoadedColor = (targetColor) => {
+        rebuildInnerSampleCanvas();
+
+        let best = null;
+        for (let y = 1; y < sampleSize - 1; y++) {
+            for (let x = 1; x < sampleSize - 1; x++) {
+                const dx = x - sampleRadius;
+                const dy = y - sampleRadius;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist > innerRadius) continue;
+
+                const pixel = sampleCtx.getImageData(x, y, 1, 1).data;
+                if (pixel[3] < 12) continue;
+
+                const rgb = {
+                    r: pixel[0],
+                    g: pixel[1],
+                    b: pixel[2]
+                };
+
+                const score = colorDistanceSq(rgb, targetColor);
+
+                if (!best || score < best.score) {
+                    best = {
+                        x: dx,
+                        y: dy,
+                        color: rgb,
+                        score
+                    };
+                }
+            }
+        }
+
+        if (best) return best;
+
+        return {
+            x: 0,
+            y: 0,
+            color: targetColor,
+            score: 0
+        };
+    };
+
+    const sampleInnerPixel = () => {
+        rebuildInnerSampleCanvas();
+
+        const canvasX = Math.round(sampleRadius + state.innerX);
+        const canvasY = Math.round(sampleRadius + state.innerY);
+
+        const clampedX = Phaser.Math.Clamp(canvasX, 1, sampleSize - 2);
+        const clampedY = Phaser.Math.Clamp(canvasY, 1, sampleSize - 2);
+
+        const pixel = sampleCtx.getImageData(clampedX, clampedY, 1, 1).data;
+
+        if (pixel[3] < 12) {
+            return state.sampledColor;
+        }
+
+        state.sampledColor = {
+            r: pixel[0],
+            g: pixel[1],
+            b: pixel[2]
+        };
+
+        return state.sampledColor;
+    };
+
+    const getLocalPointer = (pointer) => {
+        return {
+            x: pointer.x - (sw / 2),
+            y: pointer.y - (sh / 2)
+        };
+    };
+
+    const getPointerDeltaFromPicker = (pointer) => {
+        const p = getLocalPointer(pointer);
+
+        return {
+            dx: p.x - pickerX,
+            dy: p.y - pickerY
+        };
+    };
+
+    const getPointerDistanceFromPicker = (pointer) => {
+        const { dx, dy } = getPointerDeltaFromPicker(pointer);
+        return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const clampPointToHuePickerBackground = (dx, dy) => {
+        let dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < 0.0001) {
+            dx = 0;
+            dy = -hueRingInnerRadius;
+            dist = hueRingInnerRadius;
+        }
+
+        const clampedDist = Phaser.Math.Clamp(
+            dist,
+            hueRingInnerRadius,
+            hueRingOuterRadius
+        );
+
+        return {
+            x: dx / dist * clampedDist,
+            y: dy / dist * clampedDist
+        };
+    };
+
+    const clampPointToColourPickerShadow = (dx, dy) => {
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > innerRadius && dist > 0.0001) {
+            return {
+                x: dx / dist * innerRadius,
+                y: dy / dist * innerRadius
+            };
+        }
+
+        return {
+            x: dx,
+            y: dy
+        };
+    };
+
+    const isColourPickerShadowPointer = (pointer) => {
+        const dist = getPointerDistanceFromPicker(pointer);
+
+        return dist <= innerRadius;
+    };
+
+    const isHueRingPointer = (pointer) => {
+        const dist = getPointerDistanceFromPicker(pointer);
+
+        return dist >= hueRingInnerRadius && dist <= hueRingOuterRadius;
+    };
+
+    function renderInputFields() {
+        for (const key in inputState.fields) {
+            const field = inputState.fields[key];
+            const isFocused = inputState.focused === key;
+            const raw = inputState.values[key] ?? "";
+            const displayValue = raw;
+
+            field.bg.setFillStyle(isFocused ? 0x000000 : 0x000000, isFocused ? 0.56 : 0.38);
+            field.valueText.setText(`${displayValue}${isFocused ? "|" : ""}`);
+        }
+    }
+
+    const setInputValuesFromColor = (color) => {
+        const normalized = normalizeColor(color);
+
+        inputState.values.r = String(normalized.r);
+        inputState.values.g = String(normalized.g);
+        inputState.values.b = String(normalized.b);
+        inputState.values.hex = toHexString(normalized);
+
+        renderInputFields();
+    };
+
+    const updateColorUi = (color, commitDraft = true, syncInputs = true) => {
+        const normalized = normalizeColor(color);
+        const hex = toHexNumber(normalized);
+
+        state.sampledColor = normalized;
+        currentPreview.setFillStyle(hex, 1);
+
+        hueHandle.setPosition(
+            pickerX + state.hueX,
+            pickerY + state.hueY
+        );
+
+        svHandle.setPosition(
+            pickerX + state.innerX,
+            pickerY + state.innerY
+        );
+
+        if (syncInputs) {
+            setInputValuesFromColor(normalized);
+        }
+
+        if (commitDraft) {
+            this._setEditorColorChannelDraft(channelId, normalized);
+        }
+
+        if (onColorChanged) {
+            onColorChanged(normalized);
+        }
+    };
+
+    const setPickerPositionForColor = (color) => {
+        const normalized = normalizeColor(color);
+        const loadedHuePos = findHuePositionForLoadedColor(normalized);
+
+        state.hueX = loadedHuePos.x;
+        state.hueY = loadedHuePos.y;
+
+        sampleHuePixel();
+
+        const loadedInnerPos = findInnerPositionForLoadedColor(normalized);
+
+        state.innerX = loadedInnerPos.x;
+        state.innerY = loadedInnerPos.y;
+    };
+
+    const applyTypedColor = (color) => {
+        const normalized = normalizeColor(color);
+
+        inputState.focused = inputState.focused;
+        setPickerPositionForColor(normalized);
+        updateColorUi(normalized, true, true);
+    };
+
+    const tryApplyRgbInputs = () => {
+        if (
+            inputState.values.r === "" ||
+            inputState.values.g === "" ||
+            inputState.values.b === ""
+        ) {
+            renderInputFields();
+            return;
+        }
+
+        applyTypedColor({
+            r: inputState.values.r,
+            g: inputState.values.g,
+            b: inputState.values.b
+        });
+    };
+
+    const tryApplyHexInput = () => {
+        const parsed = parseHexColor(inputState.values.hex);
+
+        if (!parsed) {
+            renderInputFields();
+            return;
+        }
+
+        applyTypedColor(parsed);
+    };
+
+    const applyColor = (commitDraft = true) => {
+        const color = sampleInnerPixel();
+        updateColorUi(color, commitDraft, true);
+    };
+
+    const moveHuePickerToPointer = (pointer) => {
+        inputState.focused = null;
+        this._editorTextInputFocused = false;
+        renderInputFields();
+
+        let { dx, dy } = getPointerDeltaFromPicker(pointer);
+        const clamped = clampPointToHuePickerBackground(dx, dy);
+
+        state.hueX = clamped.x;
+        state.hueY = clamped.y;
+
+        sampleHuePixel();
+
+        applyColor(true);
+    };
+
+    const moveInnerPickerToPointer = (pointer) => {
+        inputState.focused = null;
+        this._editorTextInputFocused = false;
+        renderInputFields();
+
+        let { dx, dy } = getPointerDeltaFromPicker(pointer);
+        const clamped = clampPointToColourPickerShadow(dx, dy);
+
+        state.innerX = clamped.x;
+        state.innerY = clamped.y;
+
+        applyColor(true);
+    };
+
+    const beginPickerDrag = (pointer) => {
+        if (isColourPickerShadowPointer(pointer)) {
+            activePickerTarget = "inner";
+            moveInnerPickerToPointer(pointer);
+            return;
+        }
+
+        if (isHueRingPointer(pointer)) {
+            activePickerTarget = "hue";
+            moveHuePickerToPointer(pointer);
+            return;
+        }
+
+        activePickerTarget = null;
+    };
+
+    const continuePickerDrag = (pointer) => {
+        if (activePickerTarget === "inner") {
+            moveInnerPickerToPointer(pointer);
+            return;
+        }
+
+        if (activePickerTarget === "hue") {
+            moveHuePickerToPointer(pointer);
+        }
+    };
+
+    const endPickerDrag = () => {
+        activePickerTarget = null;
+    };
+
+    const pickerHit = this.add.circle(
+        pickerX,
+        pickerY,
+        hueRingOuterRadius + 20,
+        0xffffff,
+        0.001
+    )
+        .setInteractive({ draggable: true });
+
+    inner.add(pickerHit);
+
+    pickerHit.on("pointerdown", beginPickerDrag);
+    pickerHit.on("drag", continuePickerDrag);
+    pickerHit.on("pointerup", endPickerDrag);
+    pickerHit.on("pointerout", endPickerDrag);
+    pickerHit.on("pointerupoutside", endPickerDrag);
+
+    this._editorColorPickerKeyHandler = (event) => {
+        if (!this._editorColorPickerPopup || !inputState.focused) return;
+
+        this._editorTextInputFocused = true;
+
+        const key = inputState.focused;
+
+        if (event.key === "Escape" || event.key === "Enter") {
+            inputState.focused = null;
+            this._editorTextInputFocused = false;
+            renderInputFields();
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            return;
+        }
+
+        if (event.key === "Backspace") {
+            inputState.values[key] = String(inputState.values[key] || "").slice(0, -1);
+        } else if (key === "hex") {
+            if (/^[0-9a-fA-F]$/.test(event.key) && inputState.values.hex.length < 6) {
+                inputState.values.hex += event.key.toUpperCase();
+            } else {
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation?.();
+                return;
+            }
+        } else if (/^[0-9]$/.test(event.key) && inputState.values[key].length < 3) {
+            inputState.values[key] += event.key;
+        } else {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            return;
+        }
+
+        if (key === "hex") {
+            tryApplyHexInput();
+        } else {
+            tryApplyRgbInputs();
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+    };
+
+    window.addEventListener("keydown", this._editorColorPickerKeyHandler);
+
+    blocker.on("pointerdown", () => {
+        inputState.focused = null;
+        this._editorTextInputFocused = false;
+        renderInputFields();
+    });
+
+    rebuildHueSampleCanvas();
+    setPickerPositionForColor(currentColor);
+    state.sampledColor = normalizeColor(currentColor);
+
+    this._makeEditorOkButton(inner, 0, (panelH / 2) - 42, "OK", () => {
+        this._closeEditorColorPickerPopup();
+    });
+
+    updateColorUi(currentColor, false, true);
+};
+
+_openEditorLevelSettingsPopup = () => {
+    if (this._editorLevelSettingsPopup) return;
+    this._uhdContext = 'editorSettings';
+
+    const sw = screenWidth;
+    const sh = screenHeight;
+    const centerX = sw / 2;
+    const centerY = sh / 2;
+    const panelW = 1000;
+    const panelH = 600;
+
+    this._editorLevelSettingsPopup = this.add.container(0, 0).setScrollFactor(0).setDepth(2300);
+    const dim = this.add.rectangle(0, 0, sw, sh, 0x000000, 0.55).setOrigin(0).setInteractive();
+    this._editorLevelSettingsPopup.add(dim);
+    const inner = this.add.container(centerX, centerY).setScale(1);
+    this._editorLevelSettingsPopup.add(inner);
+
+    const corner = this.textures.exists("GJ_square01") ? this.textures.get("GJ_square01").source[0].width * 0.325 : 24;
+    const panel = this._drawScale9(0, 0, panelW, panelH, "GJ_square01", corner, 0xffffff, 1);
+    inner.add(panel);
+
+    const title = this.add.bitmapText(0, -(panelH / 2) + 42, "goldFont", "Select Color:", 40).setOrigin(0.5);
+    inner.add(title);
+
+    const colorToHex = (color) => {
+        return Phaser.Display.Color.GetColor(color.r, color.g, color.b);
+    };
+
+   const makeColorTarget = (label, channelId, x, y) => {
+        const container = this.add.container(x, y);
+        const buttonW = 50;
+        const buttonH = 50;
+        const radius = 8;
+
+        const labelText = this.add.bitmapText(0, -45, "bigFont", label, 24).setOrigin(0.5);
+
+        const buttonVisual = this.add.container(0, 0);
+        buttonVisual._bouncyBaseScale = 1;
+
+        const shadow = this.add.graphics();
+        const swatch = this.add.graphics();
+
+        buttonVisual.add([shadow, swatch]);
+
+        const hitZone = this.add.zone(0, 0, buttonW, buttonH)
+            .setOrigin(0.5)
+            .setInteractive();
+
+        container.add([labelText, buttonVisual, hitZone]);
+        inner.add(container);
+
+        const getBouncyBaseScale = () => (
+            buttonVisual._bouncyBaseScale !== undefined ? buttonVisual._bouncyBaseScale : 1
+        );
+
+        hitZone.on("pointerdown", () => {
+            const baseScale = getBouncyBaseScale();
+
+            buttonVisual._pressed = true;
+            this.tweens.killTweensOf(buttonVisual);
+
+            this.tweens.add({
+                targets: buttonVisual,
+                scale: baseScale * 1.26,
+                duration: 300,
+                ease: "Bounce.Out"
+            });
+        });
+
+        hitZone.on("pointerout", () => {
+            if (buttonVisual._pressed) {
+                buttonVisual._pressed = false;
+                this.tweens.killTweensOf(buttonVisual);
+
+                this.tweens.add({
+                    targets: buttonVisual,
+                    scale: getBouncyBaseScale(),
+                    duration: 400,
+                    ease: "Bounce.Out"
+                });
+            }
+        });
+
+        hitZone.on("pointerup", () => {
+            if (buttonVisual._pressed) {
+                buttonVisual._pressed = false;
+                this.tweens.killTweensOf(buttonVisual);
+                buttonVisual.setScale(getBouncyBaseScale());
+
+                this._openEditorColorPickerPopup(
+                    channelId,
+                    label,
+                    refresh
+                );
+            }
+        });
+
+        hitZone.on("pointerupoutside", () => {
+            if (buttonVisual._pressed) {
+                buttonVisual._pressed = false;
+                this.tweens.killTweensOf(buttonVisual);
+
+                this.tweens.add({
+                    targets: buttonVisual,
+                    scale: getBouncyBaseScale(),
+                    duration: 400,
+                    ease: "Bounce.Out"
+                });
+            }
+        });
+
+        const drawSwatch = (color) => {
+            const hex = colorToHex(color);
+
+            shadow.clear();
+            shadow.fillStyle(0x000000, 0.35);
+            shadow.fillRoundedRect(
+                -(buttonW / 2) + 4,
+                -(buttonH / 2) + 5,
+                buttonW,
+                buttonH,
+                radius
+            );
+
+            swatch.clear();
+            swatch.fillStyle(hex, 1);
+            swatch.fillRoundedRect(
+                -(buttonW / 2),
+                -(buttonH / 2),
+                buttonW,
+                buttonH,
+                radius
+            );
+
+            swatch.lineStyle(2, 0x000000, 1);
+            swatch.strokeRoundedRect(
+                -(buttonW / 2),
+                -(buttonH / 2),
+                buttonW,
+                buttonH,
+                radius
+            );
+        };
+
+        const refresh = () => {
+            const color = this._getEditorColorChannel(channelId);
+            drawSwatch(color);
+        };
+
+        refresh();
+    };
+
+    makeColorTarget("BG:", 1000, -240, -170);
+    makeColorTarget("G:", 1001, -160, -170);
+    makeColorTarget("G2:", 1009, -80, -170);
+    makeColorTarget("Line:", 1002, 0, -170);
+    makeColorTarget("Obj:", 1004, 80, -170);
+    makeColorTarget("MG:", 1013, 160, -170);
+    makeColorTarget("MG2:", 1014, 240, -170);
+
+    const speedDefs = [
+        { key: 1, label: "0.5x", objectId: 200 },
+        { key: 0, label: "1x", objectId: 201 },
+        { key: 2, label: "2x", objectId: 202 },
+        { key: 3, label: "3x", objectId: 203 },
+        { key: 4, label: "4x", objectId: 1334 }
+    ];
+
+    const modeDefs = [
+        { key: 0, label: "Cube", frame: "gj_iconBtn_off_001.png", rotateFlip: true },
+        { key: 1, label: "Ship", frame: "gj_shipBtn_off_001.png", rotateFlip: false },
+        { key: 2, label: "Ball", frame: "gj_ballBtn_off_001.png", rotateFlip: true },
+        { key: 3, label: "UFO", frame: "gj_birdBtn_off_001.png", rotateFlip: true },
+        { key: 4, label: "Wave", frame: "gj_dartBtn_off_001.png", rotateFlip: true },
+        { key: 5, label: "Robot", frame: "gj_robotBtn_off_001.png", rotateFlip: false },
+        { key: 6, label: "Spider", frame: "gj_spiderBtn_off_001.png", rotateFlip: false },
+        { key: 7, label: "Swing", frame: "gj_swingBtn_off_001.png", rotateFlip: false }
+    ];
+
+    const makeArtDefs = (prefix, count) => {
+        const defs = [];
+
+        for (let i = 1; i <= count; i++) {
+            defs.push({
+                key: i - 1,
+                label: String(i),
+                frame: `${prefix}Icon_${String(i).padStart(2, "0")}_001.png`
+            });
+        }
+
+        return defs;
+    };
+
+    const bgArtDefs = makeArtDefs("bg", 59);
+    const groundArtDefs = makeArtDefs("g", 22);
+
+    const leftX = -(panelW / 2) + 90;
+
+    const startSpeedLabel = this.add.bitmapText(leftX, -262, "goldFont", "Speed:", 30).setOrigin(0.5);
+    inner.add(startSpeedLabel);
+
+    let speedButtonObj = null;
+
+    const refreshSpeedButton = () => {
+        if (speedButtonObj) {
+            speedButtonObj.root?.destroy();
+            speedButtonObj = null;
+        }
+
+        const speedKey = this._getEditorStartValue("kA4", 0);
+        const speedDef = speedDefs.find(s => s.key === speedKey) || speedDefs[0];
+        const speedIndex = Math.max(0, speedDefs.findIndex(s => s.key === speedDef.key));
+
+        speedButtonObj = this._makeCurrentSpeedPreview(
+            inner,
+            leftX + 5,
+            -190,
+            speedDef.objectId,
+            () => {
+                this._openEditorHorizontalOptionPopup(
+                    "Select Speed",
+                    speedDefs,
+                    this._getEditorStartValue("kA4", 0),
+                    (opt) => {
+                        this._setEditorStartValueDraft("kA4", opt.key);
+                        refreshSpeedButton();
+                    },
+                    (parent, opt, ox, oy, choose, optionIndex = 0) => {
+                        return this._makeCurrentSpeedPreview(
+                            parent,
+                            ox,
+                            oy,
+                            opt.objectId,
+                            choose,
+                            89.6,
+                            optionIndex === 0 ? 1.05 : 1.2
+                        );
+                    }
+                );
+            },
+            60.8,
+            speedIndex === 0 ? 1.05 : 1.2
+        );
+    };
+
+    refreshSpeedButton();
+
+    const modeLabel = this.add.bitmapText(leftX, -105, "goldFont", "Mode:", 30).setOrigin(0.5);
+    inner.add(modeLabel);
+
+    let modeButtonObj = null;
+
+    const refreshModeButton = () => {
+        if (modeButtonObj) {
+            modeButtonObj.root?.destroy();
+            modeButtonObj = null;
+        }
+
+        const modeKey = this._getEditorStartValue("kA2", 0);
+        const modeDef = modeDefs.find(m => m.key === modeKey) || modeDefs[0];
+
+        modeButtonObj = this._makeGamemodeIconButton(inner, leftX, -40, modeDef, () => {
+            this._openEditorHorizontalOptionPopup(
+                "Select Mode",
+                modeDefs,
+                this._getEditorStartValue("kA2", 0),
+                (opt) => {
+                    this._setEditorStartValueDraft("kA2", opt.key);
+                    refreshModeButton();
+                },
+                (parent, opt, ox, oy, choose) => {
+                    return this._makeGamemodeIconButton(parent, ox, oy, opt, choose);
+                }
+            );
+        });
+    };
+
+    refreshModeButton();
+
+    const editorOptionsLabel = this.add.bitmapText(leftX, 45, "goldFont", "Options:", 30).setOrigin(0.5);
+    inner.add(editorOptionsLabel);
+
+    const editorOptionsBtn = this.add.image(leftX, 112, "GJ_GameSheet03", "GJ_optionsBtn_001.png").setScale(0.7).setAngle(-90).setFlipX(true).setInteractive();
+
+    inner.add(editorOptionsBtn);
+
+    this._makeBouncyButton(editorOptionsBtn, 0.7, () => {
+        this._openEditorStartOptionsPopup();
+    });
+
+    const rightX = (panelW / 2) - 90;
+
+    const bgArtLabel = this.add.bitmapText(rightX, -262, "goldFont", "BG:", 30).setOrigin(0.5);
+    inner.add(bgArtLabel);
+
+    let bgArtButtonObj = null;
+
+    const refreshBgArtButton = () => {
+        if (bgArtButtonObj) {
+            bgArtButtonObj.root?.destroy();
+            bgArtButtonObj = null;
+        }
+
+        const bgKey = Phaser.Math.Clamp(this._getEditorStartValue("kA6", 0), 0, bgArtDefs.length - 1);
+        const bgDef = bgArtDefs.find(bg => bg.key === bgKey) || bgArtDefs[0];
+
+        bgArtButtonObj = this._makeEditorAtlasIconButton(inner, rightX, -190, bgDef, () => {
+            this._openEditorHorizontalOptionPopup(
+                "Select Background",
+                bgArtDefs,
+                this._getEditorStartValue("kA6", 0),
+                (opt) => {
+                    this._setEditorArtValueDraft("kA6", opt.key);
+                    refreshBgArtButton();
+                },
+                (parent, opt, ox, oy, choose) => {
+                    return this._makeEditorAtlasIconButton(parent, ox, oy, opt, choose, 48);
+                }
+            );
+        }, 90);
+    };
+
+    refreshBgArtButton();
+
+    const groundArtLabel = this.add.bitmapText(rightX, -112, "goldFont", "G:", 30).setOrigin(0.5);
+    inner.add(groundArtLabel);
+
+    let groundArtButtonObj = null;
+
+    const refreshGroundArtButton = () => {
+        if (groundArtButtonObj) {
+            groundArtButtonObj.root?.destroy();
+            groundArtButtonObj = null;
+        }
+
+        const groundKey = Phaser.Math.Clamp(this._getEditorStartValue("kA7", 0), 0, groundArtDefs.length - 1);
+        const groundDef = groundArtDefs.find(g => g.key === groundKey) || groundArtDefs[0];
+
+        groundArtButtonObj = this._makeEditorAtlasIconButton(inner, rightX, -40, groundDef, () => {
+            this._openEditorHorizontalOptionPopup(
+                "Select Ground",
+                groundArtDefs,
+                this._getEditorStartValue("kA7", 0),
+                (opt) => {
+                    this._setEditorArtValueDraft("kA7", opt.key);
+                    refreshGroundArtButton();
+                },
+                (parent, opt, ox, oy, choose) => {
+                    return this._makeEditorAtlasIconButton(parent, ox, oy, opt, choose, 48);
+                }
+            );
+        }, 90);
+    };
+
+    refreshGroundArtButton();
+
+    const songBgX = -315;
+    const songBgY = 40;
+    const songBgW = 630;
+    const songBgH = 175;
+
+    const songTabY = songBgY - 25;
+    const songTabW = 110;
+    const songTextY = songBgY + (songBgH / 2);
+
+    const songTitle = this.add.bitmapText(0, songTabY - 2, "goldFont", "Select Song:", 40).setOrigin(1, 0.5);
+    inner.add(songTitle);
+
+    const songGroupW = songTitle.width + 42 + songTabW + 13 + songTabW;
+    const songGroupLeft = -(songGroupW / 2);
+
+    const songTitleX = songGroupLeft + songTitle.width;
+    const normalTabX = songTitleX + 42 + (songTabW / 2);
+    const customTabX = normalTabX + songTabW + 13;
+
+    songTitle.setPosition(songTitleX, songTabY - 2);
+
+    let songCategory = "normal";
+
+    const {
+        level: currentLevel
+    } = this._getCurrentEditorLevelRecord();
+
+    if ((this._editorPendingSongId ?? currentLevel?.songId ?? -1) > 0) {
+        songCategory = "custom";
+    }
+
+    let normalIndex = 0;
+    const activeSongId = this._editorPendingSongId ?? currentLevel?.songId ?? -1;
+
+    if (activeSongId < 0) {
+        normalIndex = Math.max(0, Math.abs(activeSongId) - 1);
+    }
+
+    let customInput = activeSongId > 0 ? String(activeSongId) : "";
+    let customFocused = false;
+
+    const makeSongTabButton = (x, label, callback) => {
+        const tabRoot = this.add.container(x, songTabY);
+        const tabBg = this.add.nineslice(0, 0, "GJ_button01", null, songTabW, 40, 18, 18, 18, 18).setInteractive();
+        const tabText = this.add.bitmapText(-3, -3, "bigFont", label, 22).setOrigin(0.5);
+
+        tabRoot.add([tabBg, tabText]);
+        inner.add(tabRoot);
+
+        this._makeCompositeBouncyButton(tabBg, tabRoot, 1, callback);
+
+        return {
+            root: tabRoot,
+            bg: tabBg,
+            text: tabText
+        };
+    };
+
+    const normalTab = makeSongTabButton(normalTabX, "Normal", () => {
+        const wasCustomSongTab = songCategory === "custom";
+
+        songCategory = "normal";
+        customFocused = false;
+        this._editorTextInputFocused = false;
+
+        if (wasCustomSongTab) {
+            normalIndex = 0;
+            commitNormalSongDraft();
+        }
+
+        updateSongUi();
+    });
+
+    const customTab = makeSongTabButton(customTabX, "Custom", () => {
+        songCategory = "custom";
+        customFocused = false;
+        this._editorTextInputFocused = false;
+        updateSongUi();
+    });
+
+    const songAreaBg = this.add.graphics();
+    songAreaBg.fillStyle(0x000000, 0.28);
+    songAreaBg.fillRoundedRect(songBgX, songBgY, songBgW, songBgH, 25);
+    inner.add(songAreaBg);
+
+    const customSongInputW = 335;
+    const customSongInputH = 62;
+    const customSongInputRadius = 12;
+    const customSongInputBg = this.add.graphics();
+    inner.add(customSongInputBg);
+
+    const songText = this.add.bitmapText(0, songTextY, "bigFont", "", 50).setOrigin(0.5);
+    inner.add(songText);
+
+    const customSongInputHit = this.add.zone(0, songTextY, customSongInputW, customSongInputH)
+        .setOrigin(0.5)
+        .setInteractive();
+    inner.add(customSongInputHit);
+
+    const prevSong = this.add.image(-250, songTextY + 2, "GJ_GameSheet03", "edit_leftBtn_001.png").setScale(1.2).setFlipX(false).setInteractive();
+    const nextSong = this.add.image(250, songTextY + 2, "GJ_GameSheet03", "edit_leftBtn_001.png").setScale(1.2).setFlipX(true).setInteractive();
+
+    inner.add([prevSong, nextSong]);
+
+    let customInputBeforeFocus = customInput;
+
+    const stopInputEvent = (event) => {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        event?.stopImmediatePropagation?.();
+    };
+
+    const blurCustomSongInput = (commit = false) => {
+        if (!customFocused) return;
+
+        customFocused = false;
+        this._editorTextInputFocused = false;
+
+        if (commit) {
+            commitCustomSongDraft();
+        }
+
+        updateSongUi();
+    };
+
+    const cancelCustomSongInput = () => {
+        if (!customFocused) return;
+
+        customInput = customInputBeforeFocus;
+        customFocused = false;
+        this._editorTextInputFocused = false;
+        updateSongUi();
+    };
+
+    const focusCustomSongInput = (pointer = null) => {
+        if (songCategory !== "custom") return;
+
+        customInputBeforeFocus = customInput;
+        customFocused = true;
+        this._editorTextInputFocused = true;
+        updateSongUi();
+        stopInputEvent(pointer?.event);
+    };
+
+    const fitSongTextToArrows = () => {
+        const maxFontSize = songCategory === "custom"
+            ? ((!customFocused && !customInput) ? 30 : 42)
+            : 50;
+        const minFontSize = 8;
+        const padding = 18;
+        let maxTextW = customSongInputW - 34;
+
+        if (songCategory !== "custom") {
+            const prevW = prevSong.displayWidth || prevSong.width || 0;
+            const nextW = nextSong.displayWidth || nextSong.width || 0;
+
+            const leftLimit = prevSong.x + (prevW / 2) + padding;
+            const rightLimit = nextSong.x - (nextW / 2) - padding;
+            maxTextW = Math.max(40, rightLimit - leftLimit);
+        }
+
+        songText.setScale(1);
+
+        for (let size = maxFontSize; size >= minFontSize; size -= 2) {
+            songText.setFontSize(size);
+
+            if (songText.width <= maxTextW) {
+                return;
+            }
+        }
+
+        if (songText.width > maxTextW && songText.width > 0) {
+            songText.setScale(maxTextW / songText.width);
+        }
+    };
+
+    const setSongText = (value) => {
+        songText.setText(value);
+        fitSongTextToArrows();
+    };
+
+    const drawCustomSongInput = () => {
+        customSongInputBg.clear();
+
+        if (songCategory !== "custom") {
+            customSongInputHit.setVisible(false);
+            customSongInputHit.disableInteractive();
+            return;
+        }
+
+        customSongInputHit.setVisible(true);
+        customSongInputHit.setInteractive();
+
+        customSongInputBg.fillStyle(0x000000, 0.42);
+        customSongInputBg.fillRoundedRect(
+            -(customSongInputW / 2),
+            songTextY - (customSongInputH / 2),
+            customSongInputW,
+            customSongInputH,
+            customSongInputRadius
+        );
+    };
+
+    const updateSongUi = () => {
+        const setTabVisual = (tab, selected) => {
+            const selectedTexture = this.textures.exists("GJ_button01") ? "GJ_button01" : tab.bg.texture.key;
+            const deselectedTexture = this.textures.exists("GJ_button04") ? "GJ_button04" : selectedTexture;
+
+            tab.bg.setTexture(selected ? selectedTexture : deselectedTexture);
+            tab.bg.clearTint();
+            tab.text.clearTint();
+        };
+
+        setTabVisual(normalTab, songCategory === "normal");
+        setTabVisual(customTab, songCategory === "custom");
+
+        prevSong.setVisible(songCategory === "normal");
+        nextSong.setVisible(songCategory === "normal");
+        drawCustomSongInput();
+
+        if (songCategory === "normal") {
+            songText.setAlpha(1);
+            songText.clearTint();
+
+            const songs = window.allLevels || [];
+
+            if (!songs.length) {
+                setSongText("No normal songs loaded");
+                return;
+            }
+
+            normalIndex = Phaser.Math.Wrap(normalIndex, 0, songs.length);
+
+            const song = songs[normalIndex];
+            const title = song?.[1] || `Song ${normalIndex + 1}`;
+
+            setSongText(`${String(normalIndex + 1).padStart(2, "0")}: ${title}`);
+        } else {
+            const customPlaceholderVisible = !customFocused && !customInput;
+
+            songText.setAlpha(1);
+            if (customPlaceholderVisible) {
+                songText.setTint(0x75aaf0);
+            } else {
+                songText.clearTint();
+            }
+            setSongText(
+                customFocused
+                    ? `${customInput}|`
+                    : customInput
+                        ? customInput
+                        : "Newgrounds Song ID"
+            );
+        }
+    };
+
+    const commitNormalSongDraft = () => {
+        const songs = window.allLevels || [];
+        if (!songs.length) return;
+
+        normalIndex = Phaser.Math.Wrap(normalIndex, 0, songs.length);
+
+        const song = songs[normalIndex];
+        const title = song?.[1] || `Song ${normalIndex + 1}`;
+
+        this._setEditorSongDraft(-(normalIndex + 1), title);
+    };
+
+    const commitCustomSongDraft = () => {
+        const id = parseInt(customInput || "0", 10);
+
+        if (!id || id <= 0) return;
+
+        this._setEditorSongDraft(id, `NG#${id}`);
+    };
+
+    this._makeBouncyButton(prevSong, 1.2, () => {
+        const songs = window.allLevels || [];
+        if (!songs.length) return;
+
+        normalIndex = Phaser.Math.Wrap(normalIndex - 1, 0, songs.length);
+        commitNormalSongDraft();
+        updateSongUi();
+    });
+
+    this._makeBouncyButton(nextSong, 1.2, () => {
+        const songs = window.allLevels || [];
+        if (!songs.length) return;
+
+        normalIndex = Phaser.Math.Wrap(normalIndex + 1, 0, songs.length);
+        commitNormalSongDraft();
+        updateSongUi();
+    });
+
+    customSongInputHit.on("pointerdown", (pointer) => {
+        focusCustomSongInput(pointer);
+    });
+
+    dim.on("pointerdown", () => {
+        blurCustomSongInput(false);
+    });
+
+    this._editorLevelSettingsKeyHandler = (event) => {
+        if (!this._editorLevelSettingsPopup) return;
+        if (songCategory !== "custom" || !customFocused) return;
+
+        if (event.key === "Escape") {
+            cancelCustomSongInput();
+            stopInputEvent(event);
+            return;
+        }
+
+        if (event.key === "Enter") {
+            blurCustomSongInput(true);
+            stopInputEvent(event);
+            return;
+        }
+
+        if (event.key === "Backspace") {
+            customInput = customInput.slice(0, -1);
+            updateSongUi();
+            stopInputEvent(event);
+            return;
+        }
+
+        if (/^[0-9]$/.test(event.key) && customInput.length < 12) {
+            customInput += event.key;
+            updateSongUi();
+            stopInputEvent(event);
+            return;
+        }
+
+        if (event.key.length === 1 || ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(event.key)) {
+            stopInputEvent(event);
+        }
+    };
+
+    window.addEventListener("keydown", this._editorLevelSettingsKeyHandler);
+
+    updateSongUi();
+
+    this._makeEditorOkButton(inner, 0, (panelH / 2) - 45, "OK", () => {
+        if (songCategory === "custom") {
+            commitCustomSongDraft();
+        }
+
+        this._closeEditorLevelSettingsPopup();
+    });
+};
+
 _initEditorPauseMenu = () => {
+    this._uhdContext = 'editorPause';
     this._editorMenuContainer = this.add.container(0, 0).setDepth(2000).setVisible(false);
 
     const bgDim = this.add.rectangle(0, 0, screenWidth, screenHeight, 0x000000, 0.6)
@@ -6755,27 +12719,28 @@ _initEditorPauseMenu = () => {
         { 
             text: "Save and Play", 
             cb: async () => { 
+                this._showEditorPauseMenu(false);
+                this._stopEditorPlaytest?.();
                 this._saveEditorLevel(); 
                 await this._showLoadingBuffer("Loading...");
                 window.isEditor = false; 
                 this.game.registry.set("autoStartGame", true); 
-                if (this._audio) this._audio.stopMusic();
                 this.scene.restart(); 
             } 
         },
         { 
             text: "Save and Exit", 
             cb: async () => { 
+                this._showEditorPauseMenu(false);
+                this._stopEditorPlaytest?.();
                 this._saveEditorLevel(); 
                 await this._showLoadingBuffer("Loading...");
                 window.isEditor = false; 
-                window._returnToEditorMenu = true;
-                if (this._audio) this._audio.stopMusic();
                 this.scene.restart(); 
             } 
         },
         { text: "Save", cb: () => this._saveEditorLevel() },
-        { text: "Exit", cb: () => { window.isEditor = false; window._returnToEditorMenu = true; if (this._audio) this._audio.stopMusic(); this.scene.restart(); } }
+        { text: "Exit", cb: () => { this._showEditorPauseMenu(false); this._stopEditorPlaytest?.(); window.isEditor = false; this.scene.restart(); } }
     ];
 
     buttonData.forEach((data, i) => {
@@ -6787,7 +12752,7 @@ _initEditorPauseMenu = () => {
 
         this._editorMenuContainer.add([btnImg, label]);
 
-        this._makeBouncyButton(btnImg, 0.75, () => {
+        this._makeCompositeBouncyButton(btnImg, [btnImg, label], 0.75, () => {
             data.cb();
         }, () => true);
     });
@@ -6808,8 +12773,12 @@ _initEditorPauseMenu = () => {
 
     createToggle(this._editorMenuContainer, 200, screenHeight - 60, "Show Glow", () => window.showEditorGlow, v => window.showEditorGlow = v,() => {
         this._level._updateGlowVisibility();
+        this._buildObjectGrid?.();
     }
 );
+    // Init runs mid editor-GUI creation; reset so the toolbox images created after
+    // this call don't get tagged with the pause-menu context.
+    this._uhdContext = null;
 };
 
 _showLoadingBuffer = (statusText) => {
@@ -6835,6 +12804,12 @@ _showLoadingBuffer = (statusText) => {
 _showEditorPauseMenu = (show) => {
     this._editorMenuContainer.setVisible(show);
     window.isEditorPaused = show;
+    window.isEditorPause = show;
+
+    if (this._editorPlaytestControls && !this._editorPlaytestActive) {
+        this._editorPlaytestControls.setVisible(true);
+        this._editorPlaytestControls.setDepth(show ? 900 : 1500);
+    }
 };
 
 _serializeLevel(levelData) {
@@ -6898,23 +12873,32 @@ _serializeObject(object) {
 
 _saveEditorLevel = () => {
     const levelData = {
-      objects: window.levelObjects,
-      settings: window.settingslist
-    }
+        objects: window.levelObjects,
+        settings: window.settingslist
+    };
+
     const newLevelString = this._serializeLevel(levelData);
-    console.log(newLevelString);
-    
+
     let createdLevels = JSON.parse(localStorage.getItem("created_levels") || "[]");
     let levelIndex = createdLevels.findIndex(l => l.createdId === window.currentlevel[2]);
 
     if (levelIndex !== -1) {
         createdLevels[levelIndex].levelString = newLevelString;
         createdLevels[levelIndex].lastModified = Date.now();
-        
+
+        if (this._editorPendingSongId !== undefined) {
+            createdLevels[levelIndex].songId = this._editorPendingSongId;
+            createdLevels[levelIndex].song = this._editorPendingSongName || createdLevels[levelIndex].song;
+        }
+
         localStorage.setItem("created_levels", JSON.stringify(createdLevels));
+
         window._onlineLevelString = createdLevels[levelIndex].levelString;
         window._onlineLevelName = createdLevels[levelIndex].levelName;
         window._onlineLevelId = createdLevels[levelIndex].createdId;
+
+        this._editorPendingSongId = undefined;
+        this._editorPendingSongName = undefined;
     }
 };
 
@@ -7058,9 +13042,17 @@ _applyMirrorEffect() {
   }
   _showNewBest() {
     let _0x9f2437 = screenWidth / 2;
-    let _0x12bde3 = this.add.image(0, 0, "GJ_WebSheet", "GJ_newBest_001.png").setOrigin(0.5, 1);
+    let _0x12bde3 = this.add.image(0, 0, "GJ_GameSheet03", "GJ_newBest_001.png").setOrigin(0.5, 1);
     let _0x544c9c = this.add.bitmapText(0, 2, "bigFont", this._lastPercent + "%", 65).setOrigin(0.5, 0).setScale(1.1);
-    let _0x326cb9 = this.add.container(_0x9f2437, 300, [_0x12bde3, _0x544c9c]).setScrollFactor(0).setDepth(60).setScale(0.01);
+    const containerChildren = [_0x12bde3, _0x544c9c];
+    const orbDelta = this._newBestOrbDelta || 0;
+    if (orbDelta > 0) {
+      const orbIcon = this.add.image(-30, 80, "GJ_GameSheet03", "currencyOrbIcon_001.png").setOrigin(0.5, 0.5).setScale(0.5);
+      const orbText = this.add.bitmapText(-8, 80, "bigFont", "+" + orbDelta, 28).setOrigin(0, 0.5).setTint(0x00ffff);
+      containerChildren.push(orbIcon, orbText);
+      this._newBestOrbDelta = 0;
+    }
+    let _0x326cb9 = this.add.container(_0x9f2437, 300, containerChildren).setScrollFactor(0).setDepth(60).setScale(0.01);
     this.tweens.add({
       targets: _0x326cb9,
       scale: 1,
@@ -7086,8 +13078,112 @@ _applyMirrorEffect() {
     _triggerEndPortal() {
     this._player.playEndAnimation(this._level.endXPos, () => this._levelComplete(), this._endPortalGameY);
   }
+  _onCoinCollected() {
+    this._coinsCollected++;
+    this._audio.playEffect("highscoreGet02");
+  }
+  _getAchievements() {
+    return [
+      { id: "stereo_bump", name: "Stereo Bump.", desc: "Complete Stereo Madness in Practice mode", level: "level_1", mode: "practice", reward: "Colour 4" },
+      { id: "stereo_madness", name: "Stereo Madness!", desc: "Complete Stereo Madness in Normal mode", level: "level_1", mode: "normal", reward: "Cube 5" },
+      { id: "on_my_way", name: "On my way!", desc: "Complete Back On Track in Practice mode", level: "level_2", mode: "practice", reward: "Colour 5" },
+      { id: "back_on_track", name: "Back On Track!", desc: "Complete Back On Track in Normal mode", level: "level_2", mode: "normal", reward: "Cube 6" },
+      { id: "polarbear", name: "Polarbear", desc: "Complete Polargeist in Practice mode", level: "level_3", mode: "practice", reward: "Colour 6" },
+      { id: "polargeist", name: "Polargeist!!", desc: "Complete Polargeist in Normal mode", level: "level_3", mode: "normal", reward: "Cube 7" },
+      { id: "dehydrated", name: "Dehydrated", desc: "Complete Dry Out in Practice mode", level: "level_4", mode: "practice", reward: "Colour 7" },
+      { id: "dry_out", name: "Dry Out!", desc: "Complete Dry Out in Normal mode", level: "level_4", mode: "normal", reward: "Cube 8" },
+      { id: "all_your_base", name: "All your base...", desc: "Complete Base After Base in Practice mode", level: "level_5", mode: "practice", reward: "Colour 8" },
+      { id: "base_after_base", name: "Base After Base!", desc: "Complete Base After Base in Normal mode", level: "level_5", mode: "normal", reward: "Cube 9" },
+      { id: "hold_on", name: "Hold on", desc: "Complete Can't Let Go in Practice mode", level: "level_6", mode: "practice", reward: "Colour 9" },
+      { id: "cant_let_go", name: "Can't Let Go!", desc: "Complete Can't Let Go in Normal mode", level: "level_6", mode: "normal", reward: "Cube 10" },
+      { id: "hop_hop", name: "Hop Hop...", desc: "Complete Jumper in Practice mode", level: "level_7", mode: "practice", reward: "Colour 10" },
+      { id: "jumper", name: "Jumper!", desc: "Complete Jumper in Normal mode", level: "level_7", mode: "normal", reward: "Cube 11" },
+      { id: "tick_tock", name: "Tick Tock", desc: "Complete Time Machine in Practice mode", level: "level_8", mode: "practice", reward: "Colour 12" },
+      { id: "time_machine", name: "Time Machine!", desc: "Complete Time Machine in Normal mode", level: "level_8", mode: "normal", reward: "Cube 14" },
+      { id: "loops", name: "Loops", desc: "Complete Cycles in Practice mode", level: "level_9", mode: "practice", reward: "Cube 15" },
+      { id: "cycles", name: "Cycles!", desc: "Complete Cycles in Normal mode", level: "level_9", mode: "normal", reward: "Cube 16" },
+      { id: "ystep", name: "yStep", desc: "Complete xStep in Practice mode", level: "level_10", mode: "practice", reward: "Cube 17" },
+      { id: "xstep", name: "xStep!", desc: "Complete xStep in Normal mode", level: "level_10", mode: "normal", reward: "Cube 18" },
+      { id: "funky", name: "Funky", desc: "Complete Clutterfunk in Practice mode", level: "level_11", mode: "practice", reward: "Colour 13" },
+      { id: "clutterfunk", name: "Clutterfunk!", desc: "Complete Clutterfunk in Normal mode", level: "level_11", mode: "normal", reward: "Ship 2" },
+      { id: "theory_of_something", name: "Theory of Something", desc: "Complete Theory of Everything in Practice mode", level: "level_12", mode: "practice", reward: "Colour 14" },
+      { id: "theory_of_everything", name: "Theory of Everything!", desc: "Complete Theory of Everything in Normal mode", level: "level_12", mode: "normal", reward: "Cube 27" },
+      { id: "electro_time", name: "Electro Time", desc: "Complete Electroman Adventures in Practice mode", level: "level_13", mode: "practice", reward: "Colour 16" },
+      { id: "electroman_adventures", name: "Electroman Adventures!", desc: "Complete Electroman Adventures in Normal mode", level: "level_13", mode: "normal", reward: "Ship 9" },
+      { id: "clubbin", name: "Clubbin", desc: "Complete Clubstep in Practice mode", level: "level_14", mode: "practice", reward: "UFO 2" },
+      { id: "clubstep", name: "Clubstep!", desc: "Complete Clubstep in Normal mode", level: "level_14", mode: "normal", reward: "Colour 15" },
+      { id: "electromaniac", name: "Electromaniac", desc: "Complete Electrodynamix in Practice mode", level: "level_15", mode: "practice", reward: "Colour 17" },
+      { id: "electrodynamix", name: "Electrodynamix!", desc: "Complete Electrodynamix in Normal mode", level: "level_15", mode: "normal", reward: "Cube 35" },
+      { id: "hexagonest", name: "Hexagonest", desc: "Complete Hexagon Force in Practice mode", level: "level_16", mode: "practice", reward: "Colour 18" },
+      { id: "hexagon_force", name: "Hexagon Force!", desc: "Complete Hexagon Force in Normal mode", level: "level_16", mode: "normal", reward: "Cube 42" },
+      { id: "blast_power", name: "Blast Power", desc: "Complete Blast Processing in Practice mode", level: "level_17", mode: "practice", reward: "Colour 20" },
+      { id: "blast_processing", name: "Blast Processing!", desc: "Complete Blast Processing in Normal mode", level: "level_17", mode: "normal", reward: "Cube 44" },
+      { id: "second_theory", name: "Second Theory", desc: "Complete Theory of Everything 2 in Practice mode", level: "level_18", mode: "practice", reward: "Colour 21" },
+      { id: "toe2", name: "Theory of Everything 2!", desc: "Complete Theory of Everything 2 in Normal mode", level: "level_18", mode: "normal", reward: "Cube 45" },
+      { id: "geometry_warrior", name: "Geometry Warrior", desc: "Complete Geometrical Dominator in Practice mode", level: "level_19", mode: "practice", reward: "Colour 24" },
+      { id: "geometrical_dominator", name: "Geometrical Dominator!", desc: "Complete Geometrical Dominator in Normal mode", level: "level_19", mode: "normal", reward: "Robot 3" },
+      { id: "living_open", name: "Living Open", desc: "Complete Deadlocked in Practice mode", level: "level_20", mode: "practice", reward: "Colour 25" },
+      { id: "deadlocked", name: "Deadlocked!", desc: "Complete Deadlocked in Normal mode", level: "level_20", mode: "normal", reward: "Robot 5" },
+      { id: "fingerdash_practice", name: "Fingerdash", desc: "Complete Fingerdash in Practice mode", level: "level_21", mode: "practice", reward: "Colour 29" },
+      { id: "fingerdash_normal", name: "Fingerdash!", desc: "Complete Fingerdash in Normal mode", level: "level_21", mode: "normal", reward: "Cube 74" },
+    ];
+  }
+  _checkAchievements(levelId, mode) {
+    let earned;
+    try { earned = JSON.parse(localStorage.getItem("gd_achievements") || "[]"); } catch(e) { earned = []; }
+    const newAchievements = [];
+    for (const ach of this._getAchievements()) {
+      if (ach.level === levelId && ach.mode === mode && !earned.includes(ach.id)) {
+        earned.push(ach.id);
+        newAchievements.push(ach);
+      }
+    }
+    if (newAchievements.length > 0) {
+      localStorage.setItem("gd_achievements", JSON.stringify(earned));
+      this._pendingAchievements = (this._pendingAchievements || []).concat(newAchievements);
+    }
+  }
+  _showAchievementNotification() {
+    if (!this._pendingAchievements || this._pendingAchievements.length === 0) return;
+    const ach = this._pendingAchievements.shift();
+    const cx = screenWidth / 2;
+    const bannerW = 500;
+    const bannerH = 70;
+    const bannerY = -bannerH;
+    const banner = this.add.container(cx, bannerY).setScrollFactor(0).setDepth(300);
+    const bg = this.add.rectangle(0, 0, bannerW, bannerH, 0x000000, 0.85).setStrokeStyle(2, 0xffff00);
+    const title = this.add.bitmapText(0, -12, "bigFont", ach.name, 24).setOrigin(0.5, 0.5).setTint(0xffff00);
+    const desc = this.add.bitmapText(0, 18, "goldFont", ach.reward, 22).setOrigin(0.5, 0.5);
+    banner.add([bg, title, desc]);
+    this.tweens.add({
+      targets: banner,
+      y: 50,
+      duration: 500,
+      ease: "Bounce.Out",
+      onComplete: () => {
+        this.tweens.add({
+          targets: banner,
+          y: bannerY,
+          duration: 300,
+          delay: 2000,
+          ease: "Quad.In",
+          onComplete: () => {
+            banner.destroy();
+            this._showAchievementNotification();
+          }
+        });
+      }
+    });
+  }
+  _starsToOrbs(stars) {
+    const orbTable = { 1:0, 2:0, 3:0, 4:125, 5:175, 6:225, 7:275, 8:350, 9:425, 10:500, 11:500, 12:500, 13:500, 14:500, 15:500 };
+    return orbTable[stars] || stars * 50;
+  }
   _levelComplete() {
+    this._starsAwarded = 0;
+    this._orbsAwarded = 0;
     if (!this._practicedMode.practiceMode) {
+      const prevBest = this._bestPercent || 0;
       this._bestPercent = 100;
       localStorage.setItem("bestPercent_" + (window.currentlevel[2] || "level_1"), 100);
       const completedKey = "gd_completedSet";
@@ -7099,6 +13195,34 @@ _applyMirrorEffect() {
         localStorage.setItem(completedKey, JSON.stringify(completedSet));
         window._completedLevels = completedSet.length;
         localStorage.setItem("gd_completedLevels", window._completedLevels);
+        const levelStars = window.currentlevel[4] || 0;
+        if (levelStars > 0) {
+          this._starsAwarded = levelStars;
+          window._totalStars = (window._totalStars || 0) + levelStars;
+          localStorage.setItem("gd_totalStars", window._totalStars);
+          const maxOrbs = this._starsToOrbs(levelStars);
+          const progressPool = maxOrbs * 0.8;
+          const completionBonus = Math.round(maxOrbs * 0.2);
+          const alreadyEarned = Math.round(progressPool * prevBest / 100);
+          const remainingProgress = Math.round(progressPool) - alreadyEarned;
+          this._orbsAwarded = remainingProgress + completionBonus;
+          if (this._orbsAwarded > 0) {
+            window._totalOrbs = (window._totalOrbs || 0) + this._orbsAwarded;
+            localStorage.setItem("gd_totalOrbs", window._totalOrbs);
+          }
+        }
+      }
+      if (this._coinsCollected > 0 && this._coinTotal > 0) {
+        const coinKey = "coins_" + levelId;
+        let savedCoins;
+        try { savedCoins = JSON.parse(localStorage.getItem(coinKey) || "[]"); } catch(e) { savedCoins = []; }
+        const coinSprites = this._level._coinSprites;
+        for (let i = 0; i < coinSprites.length; i++) {
+          if (coinSprites[i] && !coinSprites[i].visible && !savedCoins.includes(i)) {
+            savedCoins.push(i);
+          }
+        }
+        localStorage.setItem(coinKey, JSON.stringify(savedCoins));
       }
     } else {
       this._practiceBestPercent = 100;
@@ -7112,6 +13236,9 @@ _applyMirrorEffect() {
       this.time.delayedCall(_0x481f7c * 50, () => circleEffect(this, _0x356782, _0x2d967b, 10, screenWidth, 500, false, true, window.mainColor));
     }
     circleEffect(this, _0x356782, _0x2d967b, 10, 1000, 500, true, false, window.mainColor);
+    const levelId = window.currentlevel[2] || "level_1";
+    const mode = this._practicedMode.practiceMode ? "practice" : "normal";
+    this._checkAchievements(levelId, mode);
     this._showCompleteEffect();
   }
   _showCompleteEffect() {
@@ -7204,7 +13331,7 @@ _applyMirrorEffect() {
     const _0x56628c = screenWidth / 2;
     const _0x45ab26 = this._practicedMode.practiceMode
       ? this.add.image(_0x56628c, 250, "GJ_GameSheet03", "GJ_practiceComplete_001.png").setScrollFactor(0).setDepth(60).setScale(0.01)
-      : this.add.image(_0x56628c, 250, "GJ_WebSheet", "GJ_levelComplete_001.png").setScrollFactor(0).setDepth(60).setScale(0.01);
+      : this.add.image(_0x56628c, 250, "GJ_GameSheet03", "GJ_levelComplete_001.png").setScrollFactor(0).setDepth(60).setScale(0.01);
     this.tweens.add({
       targets: _0x45ab26,
       scale: 1.1,
@@ -7300,25 +13427,25 @@ _applyMirrorEffect() {
       onUpdate: () => {
         this._endLayerInternal.y = _0x59b9ab.p * 650 - 640;
       },
-      onComplete: () => this._playStarAward()
+      onComplete: () => { this._playStarAward(); this.time.delayedCall(800, () => this._showAchievementNotification()); }
     });
     const _0x595215 = 712;
     const _0x950c8d = 460;
     const _0x2a115c = (screenWidth - _0x595215) / 2;
     this._endLayerInternal.add(this.add.rectangle(_0x2a115c + 356, 310, _0x595215, _0x950c8d, 0, 180 / 255));
-    const _0x43f2e3 = this.textures.getFrame("GJ_WebSheet", "GJ_table_side_001.png");
+    const _0x43f2e3 = this.textures.getFrame("GJ_GameSheet03", "GJ_table_side_001.png");
     const _0x3feccc = _0x43f2e3 ? _0x950c8d / _0x43f2e3.height : 1;
-    this._endLayerInternal.add(this.add.image(_0x2a115c - 40, 80, "GJ_WebSheet", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, _0x3feccc));
-    this._endLayerInternal.add(this.add.image(_0x2a115c + _0x595215 + 40, 80, "GJ_WebSheet", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, _0x3feccc));
-    const _0x33b564 = this.add.image(_0x2a115c + 356, 70, "GJ_WebSheet", "GJ_table_top_001.png");
+    this._endLayerInternal.add(this.add.image(_0x2a115c - 40, 80, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, _0x3feccc));
+    this._endLayerInternal.add(this.add.image(_0x2a115c + _0x595215 + 40, 80, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, _0x3feccc));
+    const _0x33b564 = this.add.image(_0x2a115c + 356, 70, "GJ_GameSheet03", "GJ_table_top_001.png");
     this._endLayerInternal.add(_0x33b564);
-    this._endLayerInternal.add(this.add.image(_0x2a115c + 356, 560, "GJ_WebSheet", "GJ_table_bottom_001.png"));
+    this._endLayerInternal.add(this.add.image(_0x2a115c + 356, 560, "GJ_GameSheet03", "GJ_table_bottom_001.png"));
     const _0x3e9c79 = _0x33b564.y - 35;
     this._endLayerInternal.add(this.add.image(containerX - 312, _0x3e9c79, "GJ_WebSheet", "chain_01_001.png").setOrigin(0.5, 1));
     this._endLayerInternal.add(this.add.image(containerX + 312, _0x3e9c79, "GJ_WebSheet", "chain_01_001.png").setOrigin(0.5, 1));
     const _completeBanner = this._practicedMode.practiceMode
       ? this.add.image(containerX, 170, "GJ_GameSheet03", "GJ_practiceComplete_001.png").setScale(0.8)
-      : this.add.image(containerX, 170, "GJ_WebSheet", "GJ_levelComplete_001.png").setScale(0.8);
+      : this.add.image(containerX, 170, "GJ_GameSheet03", "GJ_levelComplete_001.png").setScale(0.8);
     this._endLayerInternal.add(_completeBanner);
     const _0x45b6e4 = 0.8;
     let _0xe44f6d = 250;
@@ -7338,26 +13465,22 @@ _applyMirrorEffect() {
     const _0x452429 = ["Awesome!", "Good\nJob!", "Well\nDone!", "Impressive!", "Amazing!", "Incredible!", "Skillful!", "Brilliant!", "Not\nbad!", "Warp\nSpeed!", "Challenge\nBreaker!", "Reflex\nMaster!", "I am\nspeechless...", "You are...\nThe One!", "How is this\npossible!?", "You beat\nme..."];
     const _0x165c06 = _0x452429[Math.floor(Math.random() * _0x452429.length)];
     const _0x45540f = 225;
-    this._endLayerInternal.add(this.add.bitmapText(containerX + _0x45540f, _0x241209, "bigFont", _0x165c06, 40).setOrigin(0.5, 0.5).setScale(0.8).setCenterAlign());
+    const _0x8e2b = ["\x5f\x6d\x61\x63\x72\x6f\x42\x6f\x74", "\x70\x6c\x61\x79\x69\x6e\x67"];let _0x3bc14 = 0xffffff; try {if (this[_0x8e2b[0]] && this[_0x8e2b[0]][_0x8e2b[1]]) {_0x3bc14 = (_0x3bc14 & 0xffff00) | 0xfa;}} catch (_0xe31) {}const _0x17fa2b = this.add.bitmapText(containerX + _0x45540f, _0x241209, "bigFont", _0x165c06, 40).setOrigin(0.5, 0.5).setScale(0.8).setCenterAlign();if (_0x3bc14 !== 0xffffff) _0x17fa2b.setTint(_0x3bc14);
+    this._endLayerInternal.add(_0x17fa2b);
     this._endLayerInternal.add(this.add.image(containerX - _0x45540f, 352.5, "GJ_WebSheet", "getIt_001.png").setScale(1 / 1.5));
-    const _0x34b1bd = [{
-      key: "downloadApple_001",
-      url: "https://discord.gg/TfEzAVWPSJ"
-    }, {
-      key: "downloadSteam_001",
-      url: "https://store.steampowered.com/app/322170/Geometry_Dash"
-    }];
-    for (let _0x10f8cc = 0; _0x10f8cc < _0x34b1bd.length; _0x10f8cc++) {
-      const _0xd7310b = _0x34b1bd[_0x10f8cc];
-      const _0x1e3f82 = (_0x10f8cc - 1) * _0x45540f;
-      const _0x55a82e = 1 / 1.5;
-      const _0x4c7fb8 = this.add.image(containerX + _0x1e3f82, 437.5, "GJ_WebSheet", _0xd7310b.key + ".png").setScale(_0x55a82e).setInteractive();
-      this._endLayerInternal.add(_0x4c7fb8);
-      this._makeBouncyButton(_0x4c7fb8, _0x55a82e, () => window.open(_0xd7310b.url, "_blank"));
-    }
     _0x2de55e.width;
     this._endStarX = containerX + _0x45540f;
     this._endStarY = _0x241209 - 77.5;
+    if (window.macroBot){
+      const botMenuBtn = this.add.image(containerX - 225, 255, "macroBot").setScale(0.4).setInteractive();
+      this._endLayerInternal.add(botMenuBtn);
+      this._makeBouncyButton(botMenuBtn, 0.4, () => {
+          this._buildMacroPopup();
+          if (this._macroPopup) {
+              this._macroPopup.setDepth(300); 
+          }
+      });
+    }
     const _0x45fc2b = [{
       frame: "GJ_replayBtn_001.png",
       dx: -200,
@@ -7377,12 +13500,13 @@ _applyMirrorEffect() {
       }
     }];
     for (const _0x2d4335 of _0x45fc2b) {
-      const _0xdde774 = this.add.image(containerX + _0x2d4335.dx, 555, "GJ_WebSheet", _0x2d4335.frame).setInteractive();
+      const _0xdde774 = this.add.image(containerX + _0x2d4335.dx, 555, "GJ_GameSheet03", _0x2d4335.frame).setInteractive();
       this._endLayerInternal.add(_0xdde774);
       this._makeBouncyButton(_0xdde774, 1, _0x2d4335.action);
     }
   }
   _showSettingsScreen() {
+    this._uhdContext = 'settings';
     this._settingsScreenClosing = false;
     if (this._pauseBtn) {
       this.tweens.add({
@@ -7420,13 +13544,13 @@ _applyMirrorEffect() {
     const _0x950c8d = 460;
     const _0x2a115c = (screenWidth - _0x595215) / 2;
     this._settingsLayerInternal.add(this.add.rectangle(_0x2a115c + 356, 310, _0x595215, _0x950c8d, 0, 180 / 255));
-    const _0x43f2e3 = this.textures.getFrame("GJ_WebSheet", "GJ_table_side_001.png");
+    const _0x43f2e3 = this.textures.getFrame("GJ_GameSheet03", "GJ_table_side_001.png");
     const _0x3feccc = _0x43f2e3 ? _0x950c8d / _0x43f2e3.height : 1;
-    this._settingsLayerInternal.add(this.add.image(_0x2a115c - 40, 80, "GJ_WebSheet", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, _0x3feccc));
-    this._settingsLayerInternal.add(this.add.image(_0x2a115c + _0x595215 + 40, 80, "GJ_WebSheet", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, _0x3feccc));
-    const _0x33b564 = this.add.image(_0x2a115c + 356, 70, "GJ_WebSheet", "GJ_table_top_001.png");
+    this._settingsLayerInternal.add(this.add.image(_0x2a115c - 40, 80, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, _0x3feccc));
+    this._settingsLayerInternal.add(this.add.image(_0x2a115c + _0x595215 + 40, 80, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, _0x3feccc));
+    const _0x33b564 = this.add.image(_0x2a115c + 356, 70, "GJ_GameSheet03", "GJ_table_top_001.png");
     this._settingsLayerInternal.add(_0x33b564);
-    this._settingsLayerInternal.add(this.add.image(_0x2a115c + 356, 560, "GJ_WebSheet", "GJ_table_bottom_001.png"));
+    this._settingsLayerInternal.add(this.add.image(_0x2a115c + 356, 560, "GJ_GameSheet03", "GJ_table_bottom_001.png"));
     const _0x3e9c79 = _0x33b564.y - 35;
     this._settingsLayerInternal.add(this.add.image(containerX - 312, _0x3e9c79, "GJ_WebSheet", "chain_01_001.png").setOrigin(0.5, 1));
     this._settingsLayerInternal.add(this.add.image(containerX + 312, _0x3e9c79, "GJ_WebSheet", "chain_01_001.png").setOrigin(0.5, 1));
@@ -7483,13 +13607,23 @@ _applyMirrorEffect() {
         return grp;
     };
 
-    _makeSettingsBtn(_sColL, _sRow1Y, "Account",    _sBtnW2, true, () => { this._buildAccountPopup(); });
+    _makeSettingsBtn(_sColL, _sRow1Y, "Account",    _sBtnW2, false, null);
     _makeSettingsBtn(_sColR, _sRow1Y, "How To Play", _sBtnW2, true, () => { this._buildHowToPlayPopup(); });
-    _makeSettingsBtn(_sColL, _sRow2Y, "Options",    _sBtnW2, true,  () => { this._buildSettingsPopup(); });
-    _makeSettingsBtn(_sColR, _sRow2Y, "Graphics",   _sBtnW2, true,  () => { this._buildGraphicsPopup(); });
-    _makeSettingsBtn(_sCol3L, _sRow3Y, "Rate",      _sBtnW3, true,  () => { this._buildRatePopup(); });
-    _makeSettingsBtn(_sCol3M, _sRow3Y, "Songs",     _sBtnW3, true,  () => { this._buildSongsPopup(); });
-    _makeSettingsBtn(_sCol3R, _sRow3Y, "Help",      _sBtnW3, true,  () => { this._buildHelpPopup(); });
+    _makeSettingsBtn(_sColL, _sRow2Y, "Options",    _sBtnW2, true,  () => {
+        // Hide (don't destroy) so it reappears when the Options popup closes, via _closeSettingsPopup().
+        if (this._settingsLayerInternal) this._settingsLayerInternal.setVisible(false);
+        if (this._settingsLayerOverlay) this._settingsLayerOverlay.setVisible(false);
+        this._buildSettingsPopup();
+    });
+    _makeSettingsBtn(_sColR, _sRow2Y, "Graphics",   _sBtnW2, true,  () => {
+        // Same hide/restore dance as Options: _closeSettingsPopup() brings the layer back.
+        if (this._settingsLayerInternal) this._settingsLayerInternal.setVisible(false);
+        if (this._settingsLayerOverlay) this._settingsLayerOverlay.setVisible(false);
+        this._buildGraphicsPopup();
+    });
+    _makeSettingsBtn(_sCol3L, _sRow3Y, "Rate",      _sBtnW3, false, null);
+    _makeSettingsBtn(_sCol3M, _sRow3Y, "Songs",     _sBtnW3, false, null);
+    _makeSettingsBtn(_sCol3R, _sRow3Y, "Help",      _sBtnW3, false, null);
 
     const lockIcon = this.add.image(containerX + 535, 30, "GJ_GameSheet03", "GJ_lock_open_001.png").setFlipX(false).setFlipY(false);
     lockIcon.setScale(0.9);
@@ -7574,7 +13708,7 @@ _applyMirrorEffect() {
     }
     const _0x4edc03 = containerX;
     const _0x5a0e9 = 200;
-    const _0x453043 = this.add.image(_0x4edc03, _0x5a0e9, "GJ_WebSheet", "GJ_bigStar_001.png").setScale(3).setAlpha(0);
+    const _0x453043 = this.add.image(_0x4edc03, _0x5a0e9, "GJ_GameSheet03", "GJ_bigStar_001.png").setScale(3).setAlpha(0);
     this._settingsLayerInternal.add(_0x453043);
     this.tweens.add({
       targets: _0x453043,
@@ -7630,7 +13764,374 @@ _applyMirrorEffect() {
       onComplete: _0x272eb1
     });
   }
+  _showLevelInfoPage(levelData, songKey, onPlay) {
+    if (this._levelInfoContainer) this._closeLevelInfoPage();
+    this._uhdContext = 'levelInfo';
+    const sw = screenWidth;
+    const sh = screenHeight;
+    const cx = sw / 2;
+    const cy = sh / 2;
+
+    this._levelInfoBg = this.add.graphics().setScrollFactor(0).setDepth(249);
+    const gradientSteps = 80;
+    for (let gi = 0; gi < gradientSteps; gi++) {
+      const t = gi / (gradientSteps - 1);
+      const r1 = Math.round(0x00 + (0x01 - 0x00) * t);
+      const g1 = Math.round(0x65 + (0x2c - 0x65) * t);
+      const b1 = Math.round(0xff + (0x71 - 0xff) * t);
+      const bandColor = (r1 << 16) | (g1 << 8) | b1;
+      const bandY = Math.floor(gi * sh / gradientSteps);
+      const bandH = Math.ceil(sh / gradientSteps) + 1;
+      this._levelInfoBg.fillStyle(bandColor, 1);
+      this._levelInfoBg.fillRect(0, bandY, sw, bandH);
+    }
+    this._levelInfoBgImg = null;
+    this._levelInfoBlocker = this.add.rectangle(cx, cy, sw, sh, 0, 0).setScrollFactor(0).setDepth(249).setInteractive();
+    this._levelInfoContainer = this.add.container(0, 0).setScrollFactor(0).setDepth(250);
+    const c = this._levelInfoContainer;
+    const fmtNum = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+    c.add(this.add.bitmapText(cx, 45, "bigFont", levelData.title, 48).setOrigin(0.5, 0.5));
+    c.add(this.add.bitmapText(cx, 78, "goldFont", "By " + (levelData.author || "Unknown"), 26).setOrigin(0.5, 0.5));
+
+    const diffMap = { 0: "difficulty_00_btn_001.png", 10: "difficulty_01_btn_001.png", 20: "difficulty_02_btn_001.png", 30: "difficulty_03_btn_001.png", 40: "difficulty_04_btn_001.png", 50: "difficulty_05_btn_001.png" };
+    const diffVal = levelData.difficulty || 0;
+    const diffFrame = diffMap[diffVal] || "difficulty_00_btn_001.png";
+    const leftX = cx - 250;
+
+    c.add(this.add.image(leftX, cy - 80, "GJ_GameSheet03", diffFrame).setScale(0.85));
+
+    if (levelData.stars > 0) {
+      c.add(this.add.bitmapText(leftX - 15, cy - 20, "bigFont", String(levelData.stars), 26).setOrigin(1, 0.5));
+      c.add(this.add.image(leftX + 5, cy - 20, "GJ_GameSheet03", "GJ_bigStar_001.png").setScale(0.3));
+    }
+
+    const playBtn = this.add.image(cx, cy - 70, "GJ_GameSheet03", "GJ_playBtn2_001.png").setInteractive().setFlipY(true).setAngle(90).setScale(1.0);
+    c.add(playBtn);
+    this._makeBouncyButton(playBtn, 1.0, onPlay);
+
+    const rightX = cx + 180;
+    const ry = cy - 125;
+    const gap = 32;
+
+    c.add(this.add.image(rightX, ry, "GJ_GameSheet03", "GJ_downloadsIcon_001.png").setScale(0.65));
+    c.add(this.add.bitmapText(rightX + 22, ry, "goldFont", fmtNum(levelData.downloads || 0), 22).setOrigin(0, 0.5));
+
+    c.add(this.add.image(rightX, ry + gap, "GJ_GameSheet03", "GJ_likesIcon_001.png").setScale(0.65));
+    c.add(this.add.bitmapText(rightX + 22, ry + gap, "goldFont", fmtNum(levelData.likes || 0), 22).setOrigin(0, 0.5));
+
+    const lengthNames = ["Tiny", "Short", "Medium", "Long", "XL", "Plat."];
+    c.add(this.add.image(rightX, ry + gap * 2, "GJ_GameSheet03", "GJ_timeIcon_001.png").setScale(0.65));
+    c.add(this.add.bitmapText(rightX + 22, ry + gap * 2, "goldFont", lengthNames[levelData.length] || "?", 22).setOrigin(0, 0.5));
+
+    c.add(this.add.image(rightX, ry + gap * 3, "GJ_GameSheet03", "currencyOrbIcon_001.png").setScale(0.55));
+    const maxOrbs = levelData.orbs || 0;
+    const savedId = "online_" + levelData.id;
+    const bestPctOrbs = parseFloat(localStorage.getItem("bestPercent_" + savedId) || "0");
+    const earnedOrbs = Math.round(maxOrbs * 0.8 * bestPctOrbs / 100);
+    c.add(this.add.bitmapText(rightX + 22, ry + gap * 3, "goldFont", earnedOrbs + "/" + maxOrbs, 22).setOrigin(0, 0.5));
+
+    const bestNormal = parseFloat(localStorage.getItem("bestPercent_" + savedId) || "0");
+    const bestPractice = parseFloat(localStorage.getItem("practiceBestPercent_" + savedId) || "0");
+    const barW = Math.min(550, sw - 250);
+    const barH = 26;
+    const barX = cx - barW / 2;
+
+    const normalY = cy + 65;
+    c.add(this.add.bitmapText(cx, normalY - 20, "bigFont", "Normal Mode", 22).setOrigin(0.5, 0.5));
+    const nBarBg = this.add.graphics().setScrollFactor(0).setDepth(250);
+    nBarBg.fillStyle(0x000000, 0.6); nBarBg.fillRoundedRect(barX, normalY - barH / 2, barW, barH, barH / 2);
+    c.add(nBarBg);
+    if (bestNormal > 0) {
+      const nBarFg = this.add.graphics().setScrollFactor(0).setDepth(251);
+      nBarFg.fillStyle(0x00FF00, 1);
+      const fillW = Math.max(barH, barW * bestNormal / 100);
+      const rr = bestNormal >= 100 ? barH / 2 : 0;
+      nBarFg.fillRoundedRect(barX + 2, normalY - barH / 2 + 2, fillW - 4, barH - 4, { tl: barH / 2, bl: barH / 2, tr: rr, br: rr });
+      c.add(nBarFg);
+    }
+    c.add(this.add.bitmapText(cx, normalY, "bigFont", Math.round(bestNormal) + "%", 16).setOrigin(0.5, 0.5).setDepth(252));
+
+    const practY = normalY + 50;
+    c.add(this.add.bitmapText(cx, practY - 20, "bigFont", "Practice Mode", 22).setOrigin(0.5, 0.5));
+    const pBarBg = this.add.graphics().setScrollFactor(0).setDepth(250);
+    pBarBg.fillStyle(0x000000, 0.6); pBarBg.fillRoundedRect(barX, practY - barH / 2, barW, barH, barH / 2);
+    c.add(pBarBg);
+    if (bestPractice > 0) {
+      const pBarFg = this.add.graphics().setScrollFactor(0).setDepth(251);
+      pBarFg.fillStyle(0x00FFFF, 1);
+      const fillW = Math.max(barH, barW * bestPractice / 100);
+      const rr = bestPractice >= 100 ? barH / 2 : 0;
+      pBarFg.fillRoundedRect(barX + 2, practY - barH / 2 + 2, fillW - 4, barH - 4, { tl: barH / 2, bl: barH / 2, tr: rr, br: rr });
+      c.add(pBarFg);
+    }
+    c.add(this.add.bitmapText(cx, practY, "bigFont", Math.round(bestPractice) + "%", 16).setOrigin(0.5, 0.5).setDepth(252));
+
+    const songCardW = Math.min(550, sw - 200);
+    const songCardH = 95;
+    const songCardX = cx;
+    const songCardY = sh - 55;
+    const songBg = this.add.graphics().setScrollFactor(0).setDepth(250);
+    songBg.fillStyle(0x8B4513, 1);
+    songBg.fillRoundedRect(songCardX - songCardW / 2, songCardY - songCardH / 2, songCardW, songCardH, 14);
+    songBg.lineStyle(2, 0x5a2d0c, 1);
+    songBg.strokeRoundedRect(songCardX - songCardW / 2, songCardY - songCardH / 2, songCardW, songCardH, 14);
+    c.add(songBg);
+    const sTitle = window._onlineSongTitle || "Unknown";
+    const sArtist = window._onlineSongArtist || "Unknown";
+    const songId = levelData.isCustomSong ? levelData.customSongID : levelData.officialSong;
+    const sLeft = songCardX - songCardW / 2 + 20;
+    const songTitleText = this.add.bitmapText(sLeft, songCardY - 20, "bigFont", sTitle, 24).setOrigin(0, 0.5).setInteractive();
+    c.add(songTitleText);
+    c.add(this.add.bitmapText(sLeft, songCardY + 5, "goldFont", "By: " + sArtist, 20).setOrigin(0, 0.5));
+    c.add(this.add.bitmapText(sLeft, songCardY + 27, "goldFont", "SongID: " + songId, 16).setOrigin(0, 0.5).setTint(0xcccccc));
+    songTitleText.on("pointerdown", () => this._showNongPopup(songId, songKey));
+
+    const backArrow = this.add.image(50, 48, "GJ_GameSheet03", "GJ_arrow_01_001.png").setInteractive();
+    c.add(backArrow);
+    this._makeBouncyButton(backArrow, 1, () => this._closeLevelInfoPage());
+
+    const btnX = sw - 45;
+    const infoBtn = this.add.image(btnX, 48, "GJ_GameSheet03", "GJ_infoBtn_001.png").setInteractive().setScale(0.85).setAngle(90);
+    c.add(infoBtn);
+    this._makeBouncyButton(infoBtn, 0.85, () => {
+      const desc = levelData.description || "No description.";
+      const descId = "ID: " + levelData.id;
+      if (this._infoPopupObjs) { this._infoPopupObjs.forEach(o => o.destroy()); this._infoPopupObjs = null; return; }
+      const popBg = this.add.rectangle(cx, cy, 500, 200, 0x000000, 0.9).setScrollFactor(0).setDepth(260).setStrokeStyle(2, 0xffffff).setInteractive();
+      const popTitle = this.add.bitmapText(cx, cy - 60, "bigFont", descId, 24).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(261);
+      const popDesc = this.add.bitmapText(cx, cy + 10, "goldFont", desc, 22).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(261).setMaxWidth(460);
+      this._infoPopupObjs = [popBg, popTitle, popDesc];
+      popBg.on("pointerdown", () => { this._infoPopupObjs.forEach(o => o.destroy()); this._infoPopupObjs = null; });
+    });
+
+    c.add(this.add.image(0, sh, "GJ_GameSheet03", "GJ_sideArt_001.png").setOrigin(1, 1).setFlipY(true).setAngle(90));
+    c.add(this.add.image(sw, sh, "GJ_GameSheet03", "GJ_sideArt_001.png").setOrigin(1, 0).setAngle(90));
+  }
+  async _showNongPopup(songId, songKey) {
+    if (this._nongPopupObjs) { this._nongPopupObjs.forEach(o => o.destroy()); this._nongPopupObjs = null; return; }
+    this._uhdContext = 'nong';
+    const cx = screenWidth / 2;
+    const cy = screenHeight / 2;
+    const popW = 620;
+    const popH = 420;
+    const d = 270;
+
+    const overlay = this.add.rectangle(cx, cy, screenWidth, screenHeight, 0x000000, 0.5).setScrollFactor(0).setDepth(d).setInteractive();
+    const bg = this.add.graphics().setScrollFactor(0).setDepth(d);
+    bg.fillStyle(0x1a1a3a, 1);
+    bg.fillRoundedRect(cx - popW / 2, cy - popH / 2, popW, popH, 16);
+    bg.lineStyle(3, 0x5555cc, 1);
+    bg.strokeRoundedRect(cx - popW / 2, cy - popH / 2, popW, popH, 16);
+    const titleBg = this.add.graphics().setScrollFactor(0).setDepth(d);
+    titleBg.fillStyle(0x2a2a5a, 1);
+    titleBg.fillRoundedRect(cx - popW / 2 + 10, cy - popH / 2 + 8, popW - 20, 40, 8);
+    const title = this.add.bitmapText(cx, cy - popH / 2 + 28, "bigFont", "Song Replacements", 26).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(d + 1);
+    const loadingText = this.add.bitmapText(cx, cy, "goldFont", "Loading...", 24).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(d + 1);
+
+    const closeNong = () => { if (this._nongPopupObjs) { this._nongPopupObjs.forEach(o => o.destroy()); this._nongPopupObjs = null; } };
+    overlay.on("pointerdown", closeNong);
+    const closeBtn = this.add.image(cx + popW / 2 - 25, cy - popH / 2 + 28, "GJ_GameSheet03", "GJ_deleteBtn_001.png").setScale(0.55).setScrollFactor(0).setDepth(d + 2).setInteractive().setAngle(90);
+    this._makeBouncyButton(closeBtn, 0.55, closeNong);
+
+    this._nongPopupObjs = [overlay, bg, titleBg, title, loadingText, closeBtn];
+
+    try {
+      const res = await fetch(`https://api.songfilehub.com/songs?songID=${songId}`);
+      if (!res.ok) throw new Error("API returned " + res.status);
+      const songs = await res.json();
+      this._uhdContext = 'nong'; // update() zeroes this every frame while we were awaiting the fetch
+      loadingText.destroy();
+
+      if (!songs || songs.length === 0) {
+        const noSongs = this.add.bitmapText(cx, cy, "goldFont", "No replacements found.", 24).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(d + 1);
+        this._nongPopupObjs.push(noSongs);
+        return;
+      }
+
+      const listTop = cy - popH / 2 + 58;
+      const listBottom = cy + popH / 2 - 45;
+      const rowH = 55;
+      const maxVisible = Math.floor((listBottom - listTop) / rowH);
+      let page = 0;
+      const totalPages = Math.ceil(songs.length / maxVisible);
+      const rowObjs = [];
+
+      const buildPage = () => {
+        rowObjs.forEach(o => o.destroy());
+        rowObjs.length = 0;
+        const start = page * maxVisible;
+        const pageItems = songs.slice(start, start + maxVisible);
+        pageItems.forEach((song, i) => {
+          const y = listTop + i * rowH + rowH / 2;
+          const rowBg = this.add.rectangle(cx, y, popW - 24, rowH - 4, i % 2 === 0 ? 0x222250 : 0x2a2a60, 1)
+            .setScrollFactor(0).setDepth(d + 1);
+          const nameStr = (song.songName || "Unknown");
+          const name = this.add.bitmapText(cx - popW / 2 + 25, y - 10, "bigFont", nameStr.length > 38 ? nameStr.substring(0, 36) + ".." : nameStr, 18)
+            .setOrigin(0, 0.5).setScrollFactor(0).setDepth(d + 2);
+          const tag = song.state ? song.state.charAt(0).toUpperCase() + song.state.slice(1) : "";
+          const info = this.add.bitmapText(cx - popW / 2 + 25, y + 12, "goldFont", tag + (tag ? " - " : "") + (song.downloads || 0) + " downloads", 16)
+            .setOrigin(0, 0.5).setScrollFactor(0).setDepth(d + 2).setTint(0x999999);
+          const isActive = window._activeNongId === song._id;
+          const useBtn = this.add.nineslice(cx + popW / 2 - 55, y, "GJ_button01", null, 80, 36, 24, 24, 24, 24)
+            .setScale(0.6).setInteractive().setScrollFactor(0).setDepth(d + 2);
+          if (isActive) useBtn.setTint(0xffaa00);
+          const useTxt = this.add.bitmapText(cx + popW / 2 - 55, y - 1, "bigFont", isActive ? "Active" : "Use", 20)
+            .setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(d + 3).setTint(isActive ? 0xffff00 : 0xffffff);
+          this._makeBouncyButton(useBtn, 0.6, async () => {
+            useTxt.setText("...");
+            try {
+              const audioCtx = this.game.sound.context;
+              if (audioCtx.state === "suspended") await audioCtx.resume();
+              const audioRes = await fetch(song.downloadUrl);
+              if (!audioRes.ok) throw new Error("Failed: " + audioRes.status);
+              const arrayBuf = await audioRes.arrayBuffer();
+              const decoded = await audioCtx.decodeAudioData(arrayBuf);
+              window._onlineSongBuffer = decoded;
+              window._onlineSongKey = window.currentlevel[0];
+              window._onlineSongTitle = song.songName || "NONG";
+              window._activeNongId = song._id;
+              useTxt.setText("Active").setTint(0xffff00);
+              useBtn.setTint(0xffaa00);
+            } catch (e) {
+              console.error("NONG download failed:", e.message);
+              useTxt.setText("Fail").setTint(0xff0000);
+            }
+          });
+          rowObjs.push(rowBg, name, info, useBtn, useTxt);
+          this._nongPopupObjs.push(rowBg, name, info, useBtn, useTxt);
+        });
+      };
+      buildPage();
+
+      const navY = cy + popH / 2 - 22;
+      const pgLabel = this.add.bitmapText(cx, navY, "goldFont", (page + 1) + " / " + totalPages, 22).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(d + 2);
+      this._nongPopupObjs.push(pgLabel);
+
+      const prevBtn = this.add.image(cx - 80, navY, "GJ_GameSheet03", "GJ_arrow_03_001.png").setScale(0.6).setInteractive().setScrollFactor(0).setDepth(d + 2);
+      this._nongPopupObjs.push(prevBtn);
+      this._makeBouncyButton(prevBtn, 0.6, () => {
+        if (page > 0) { page--; buildPage(); pgLabel.setText((page + 1) + " / " + totalPages); }
+      });
+
+      const nextBtn = this.add.image(cx + 80, navY, "GJ_GameSheet03", "GJ_arrow_03_001.png").setScale(0.6).setFlipX(true).setInteractive().setScrollFactor(0).setDepth(d + 2);
+      this._nongPopupObjs.push(nextBtn);
+      this._makeBouncyButton(nextBtn, 0.6, () => {
+        if (page < totalPages - 1) { page++; buildPage(); pgLabel.setText((page + 1) + " / " + totalPages); }
+      });
+    } catch (e) {
+      loadingText.setText("Failed to load.");
+      console.error("SongFileHub error:", e.message);
+    }
+  }
+  _closeLevelInfoPage() {
+    if (this._levelInfoContainer) { this._levelInfoContainer.destroy(); this._levelInfoContainer = null; }
+    if (this._levelInfoBg) { this._levelInfoBg.destroy(); this._levelInfoBg = null; }
+    if (this._levelInfoBgImg) { this._levelInfoBgImg.destroy(); this._levelInfoBgImg = null; }
+    if (this._levelInfoBlocker) { this._levelInfoBlocker.destroy(); this._levelInfoBlocker = null; }
+    if (this._infoPopupObjs) { this._infoPopupObjs.forEach(o => o.destroy()); this._infoPopupObjs = null; }
+    if (this._nongPopupObjs) { this._nongPopupObjs.forEach(o => o.destroy()); this._nongPopupObjs = null; }
+  }
+  _showAchievementsScreen() {
+    if (this._achLayerInternal) return;
+    this._uhdContext = 'achLayer';
+    const cx = screenWidth / 2;
+    this._achLayerOverlay = this.add.rectangle(cx, 320, screenWidth, screenHeight, 0, 0).setScrollFactor(0).setDepth(200).setInteractive();
+    this._achLayerInternal = this.add.container(0, -640).setScrollFactor(0).setDepth(201);
+    this.tweens.add({ targets: this._achLayerOverlay, alpha: 100 / 255, duration: 500 });
+    const slideObj = { p: 0 };
+    this.tweens.add({
+      targets: slideObj, p: 1, duration: 800, ease: "Bounce.Out",
+      onUpdate: () => { this._achLayerInternal.y = slideObj.p * 650 - 640; }
+    });
+    const panelW = 712;
+    const panelH = 460;
+    const panelX = (screenWidth - panelW) / 2;
+    this._achLayerInternal.add(this.add.rectangle(panelX + 356, 310, panelW, panelH, 0, 180 / 255));
+    const sideFrame = this.textures.getFrame("GJ_GameSheet03", "GJ_table_side_001.png");
+    const sideScale = sideFrame ? panelH / sideFrame.height : 1;
+    this._achLayerInternal.add(this.add.image(panelX - 40, 80, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, sideScale));
+    this._achLayerInternal.add(this.add.image(panelX + panelW + 40, 80, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, sideScale));
+    this._achLayerInternal.add(this.add.image(panelX + 356, 70, "GJ_GameSheet03", "GJ_table_top_001.png"));
+    this._achLayerInternal.add(this.add.image(panelX + 356, 560, "GJ_GameSheet03", "GJ_table_bottom_001.png"));
+    this._achLayerInternal.add(this.add.image(cx - 312, 35, "GJ_WebSheet", "chain_01_001.png").setOrigin(0.5, 1));
+    this._achLayerInternal.add(this.add.image(cx + 312, 35, "GJ_WebSheet", "chain_01_001.png").setOrigin(0.5, 1));
+    this._achLayerInternal.add(this.add.bitmapText(cx, 65, "bigFont", "Achievements", 45).setOrigin(0.5, 0.5));
+
+    let earned;
+    try { earned = JSON.parse(localStorage.getItem("gd_achievements") || "[]"); } catch(e) { earned = []; }
+    const allAch = this._getAchievements();
+
+    this._achPage = 0;
+    const rowTop = 100;
+    const rowBottom = 540;
+    const rowsPerPage = 3;
+    const rowLeft = panelX + 7.8;
+    const rowRight = panelX + panelW - 7.8;
+    const rowWidth = rowRight - rowLeft;
+    const rowH = (rowBottom - rowTop) / rowsPerPage;
+    this._achRowObjs = [];
+
+    const buildAchPage = () => {
+      for (const o of this._achRowObjs) o.destroy();
+      this._achRowObjs = [];
+      const start = this._achPage * rowsPerPage;
+      const end = Math.min(start + rowsPerPage, allAch.length);
+      const pageItems = allAch.slice(start, end);
+
+      pageItems.forEach((ach, i) => {
+        const y = rowTop + i * rowH + rowH / 2;
+        const isEarned = earned.includes(ach.id);
+        const bg = this.add.rectangle(cx, y, rowWidth, rowH, i % 2 === 0 ? 0xac531e : 0xcf6d30).setOrigin(0.5, 0.5);
+        const lockFrame = isEarned ? "GJ_lock_open_001.png" : "GJ_lock_001.png";
+        const lockIcon = this.add.image(rowLeft + 40, y, "GJ_GameSheet03", lockFrame);
+        const nameText = this.add.bitmapText(rowLeft + 90, y - 18, "bigFont", ach.name, 28).setOrigin(0, 0.5).setTint(0xffff00);
+        const descText = this.add.bitmapText(rowLeft + 90, y + 18, "goldFont", ach.desc, 24).setOrigin(0, 0.5);
+        this._achLayerInternal.add([bg, lockIcon, nameText, descText]);
+        this._achRowObjs.push(bg, lockIcon, nameText, descText);
+        if (i > 0) {
+          const line = this.add.rectangle(cx, rowTop + i * rowH, rowWidth, 1, 0x000000, 0.3).setOrigin(0.5, 0.5);
+          this._achLayerInternal.add(line);
+          this._achRowObjs.push(line);
+        }
+      });
+
+      if (this._achCountLabel) this._achCountLabel.destroy();
+      const totalPages = Math.ceil(allAch.length / rowsPerPage);
+      this._achCountLabel = this.add.bitmapText(cx + 340, 20, "bigFont", (start + 1) + " to " + end + " of " + allAch.length, 22).setOrigin(1, 0.5).setTint(0xffff00);
+      this._achLayerInternal.add(this._achCountLabel);
+      this._achRowObjs.push(this._achCountLabel);
+    };
+    buildAchPage();
+
+    const backBtn = this.add.image(cx - 535, 30, "GJ_GameSheet03", "GJ_arrow_03_001.png").setInteractive();
+    this._achLayerInternal.add(backBtn);
+    this._makeBouncyButton(backBtn, 1, () => this._hideAchievementsScreen());
+
+    const nextBtn = this.add.image(cx + 535, 310, "GJ_GameSheet03", "GJ_arrow_03_001.png").setInteractive().setFlipX(true).setScale(1.2);
+    this._achLayerInternal.add(nextBtn);
+    this._makeBouncyButton(nextBtn, 1.2, () => {
+      const totalPages = Math.ceil(allAch.length / rowsPerPage);
+      if (this._achPage < totalPages - 1) { this._achPage++; buildAchPage(); }
+    });
+    const prevBtn = this.add.image(cx - 535, 310, "GJ_GameSheet03", "GJ_arrow_03_001.png").setInteractive().setScale(1.2);
+    this._achLayerInternal.add(prevBtn);
+    this._makeBouncyButton(prevBtn, 1.2, () => {
+      if (this._achPage > 0) { this._achPage--; buildAchPage(); }
+    });
+  }
+  _hideAchievementsScreen() {
+    if (!this._achLayerInternal) return;
+    this.tweens.add({ targets: this._achLayerOverlay, alpha: 0, duration: 300, onComplete: () => { this._achLayerOverlay.destroy(); this._achLayerOverlay = null; } });
+    const slideObj = { p: 1 };
+    this.tweens.add({
+      targets: slideObj, p: 0, duration: 500, ease: "Quad.In",
+      onUpdate: () => { this._achLayerInternal.y = slideObj.p * 650 - 640; },
+      onComplete: () => { this._achLayerInternal.destroy(); this._achLayerInternal = null; this._achRowObjs = []; }
+    });
+  }
   _showStatsScreen() {
+    this._uhdContext = 'stats';
     if (this._pauseBtn) {
       this.tweens.add({
         targets: this._pauseBtn,
@@ -7663,13 +14164,13 @@ _applyMirrorEffect() {
     const _0x950c8d = 460;
     const _0x2a115c = (screenWidth - _0x595215) / 2;
     this._statsLayerInternal.add(this.add.rectangle(_0x2a115c + 356, 310, _0x595215, _0x950c8d, 0xac531e));
-    const _0x43f2e3 = this.textures.getFrame("GJ_WebSheet", "GJ_table_side_001.png");
+    const _0x43f2e3 = this.textures.getFrame("GJ_GameSheet03", "GJ_table_side_001.png");
     const _0x3feccc = _0x43f2e3 ? _0x950c8d / _0x43f2e3.height : 1;
-    this._statsLayerInternal.add(this.add.image(_0x2a115c - 40, 80, "GJ_WebSheet", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, _0x3feccc));
-    this._statsLayerInternal.add(this.add.image(_0x2a115c + _0x595215 + 40, 80, "GJ_WebSheet", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, _0x3feccc));
-    const _0x33b564 = this.add.image(_0x2a115c + 356, 70, "GJ_WebSheet", "GJ_table_top_001.png");
+    this._statsLayerInternal.add(this.add.image(_0x2a115c - 40, 80, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(0, 0).setScale(1, _0x3feccc));
+    this._statsLayerInternal.add(this.add.image(_0x2a115c + _0x595215 + 40, 80, "GJ_GameSheet03", "GJ_table_side_001.png").setOrigin(1, 0).setFlipX(true).setScale(1, _0x3feccc));
+    const _0x33b564 = this.add.image(_0x2a115c + 356, 70, "GJ_GameSheet03", "GJ_table_top_001.png");
     this._statsLayerInternal.add(_0x33b564);
-    this._statsLayerInternal.add(this.add.image(_0x2a115c + 356, 560, "GJ_WebSheet", "GJ_table_bottom_001.png"));
+    this._statsLayerInternal.add(this.add.image(_0x2a115c + 356, 560, "GJ_GameSheet03", "GJ_table_bottom_001.png"));
     const _0x3e9c79 = _0x33b564.y - 35;
     this._statsLayerInternal.add(this.add.image(containerX - 312, _0x3e9c79, "GJ_WebSheet", "chain_01_001.png").setOrigin(0.5, 1));
     this._statsLayerInternal.add(this.add.image(containerX + 312, _0x3e9c79, "GJ_WebSheet", "chain_01_001.png").setOrigin(0.5, 1));
@@ -7683,13 +14184,13 @@ _applyMirrorEffect() {
     const _rowH = (_rowPanelBottom - _rowPanelTop) / _rowCount;
 
     const rows = [
+      { label: "Total Stars:",          value: String(window._totalStars || 0) },
       { label: "Total Jumps:",         value: String(this._totalJumps || 0) },
       { label: "Total Attempts:",       value: String(this._attempts || 1) },
       { label: "Completed Levels:",     value: String(window._completedLevels || 0) },
       { label: "Total Deaths:",      value: String(this._totalDeaths || 0) },
-      { label: "???:",   value: String(window._totalDiamonds || '?') },
-      { label: "???:", value: String(window._totalOrbs || '?') },
-      
+      { label: "Mana Orbs:", value: String(window._totalOrbs || 0) },
+
     ];
     rows.forEach((row, index) => {
       const rowCenterY = _rowPanelTop + index * _rowH + _rowH / 2;
@@ -7767,7 +14268,8 @@ _applyMirrorEffect() {
     }
     const _0x4edc03 = this._endStarX;
     const _0x5a0e9 = this._endStarY;
-    const _0x453043 = this.add.image(_0x4edc03, _0x5a0e9, "GJ_WebSheet", "GJ_bigStar_001.png").setScale(3).setAlpha(0);
+    const starCount = this._starsAwarded || 0;
+    const _0x453043 = this.add.image(_0x4edc03, _0x5a0e9, "GJ_GameSheet03", "GJ_bigStar_001.png").setScale(3).setAlpha(0);
     this._endLayerInternal.add(_0x453043);
     this.tweens.add({
       targets: _0x453043,
@@ -7777,6 +14279,42 @@ _applyMirrorEffect() {
       delay: 0,
       ease: "Bounce.Out"
     });
+    if (starCount > 0) {
+      const starLabel = this.add.bitmapText(_0x4edc03, _0x5a0e9 + 35, "bigFont", "+" + starCount, 28).setOrigin(0.5, 0.5).setScale(3).setAlpha(0);
+      this._endLayerInternal.add(starLabel);
+      this.tweens.add({
+        targets: starLabel,
+        scale: 1,
+        alpha: 1,
+        duration: 300,
+        delay: 100,
+        ease: "Bounce.Out"
+      });
+    }
+    const orbCount = this._orbsAwarded || 0;
+    if (orbCount > 0) {
+      const orbY = _0x5a0e9 + 60;
+      const orbLabel = this.add.bitmapText(_0x4edc03 + 10, orbY, "bigFont", "+" + orbCount, 22).setOrigin(0, 0.5).setScale(3).setAlpha(0).setTint(0x00ffff);
+      this._endLayerInternal.add(orbLabel);
+      const orbIcon = this.add.image(_0x4edc03 - 8, orbY, "GJ_GameSheet03", "currencyOrbIcon_001.png").setScale(3).setAlpha(0).setOrigin(1, 0.5);
+      this._endLayerInternal.add(orbIcon);
+      this.tweens.add({
+        targets: orbIcon,
+        scale: 0.4,
+        alpha: 1,
+        duration: 300,
+        delay: 300,
+        ease: "Bounce.Out"
+      });
+      this.tweens.add({
+        targets: orbLabel,
+        scale: 0.8,
+        alpha: 1,
+        duration: 300,
+        delay: 400,
+        ease: "Bounce.Out"
+      });
+    }
     this.time.delayedCall(100, () => {
       this._audio.playEffect("highscoreGet02");
       const _0x1204d3 = _0x4edc03;
@@ -7895,22 +14433,22 @@ _applyMirrorEffect() {
 
     const addRow = () => { _rowCount++; _redrawStripes(); };
     const clearRows = () => { _rowCount = 0; _redrawStripes(); };
-    const sideFrame = this.textures.getFrame("GJ_WebSheet", "GJ_table_side_001.png");
+    const sideFrame = this.textures.getFrame("GJ_GameSheet03", "GJ_table_side_001.png");
     const sideScaleY = sideFrame ? panelH / sideFrame.height : 1;
     const leftBorder = this.add.image(listLeft - 40, 90,
-      "GJ_WebSheet", "GJ_table_side_001.png")
+      "GJ_GameSheet03", "GJ_table_side_001.png")
       .setScrollFactor(0).setDepth(203).setOrigin(0, 0).setScale(1, sideScaleY);
     objects.push(leftBorder);
     const rightBorder = this.add.image(listLeft + panelW + 40, 90,
-      "GJ_WebSheet", "GJ_table_side_001.png")
+      "GJ_GameSheet03", "GJ_table_side_001.png")
       .setScrollFactor(0).setDepth(203).setOrigin(1, 0).setFlipX(true).setScale(1, sideScaleY);
     objects.push(rightBorder);
     const topBorder = this.add.image(panelCX, 80,
-      "GJ_WebSheet", "GJ_table_top_001.png")
+      "GJ_GameSheet03", "GJ_table_top_001.png")
       .setScrollFactor(0).setDepth(203).setOrigin(0.5);
     objects.push(topBorder);
     const bottomBorder = this.add.image(panelCX, 570,
-      "GJ_WebSheet", "GJ_table_bottom_001.png")
+      "GJ_GameSheet03", "GJ_table_bottom_001.png")
       .setScrollFactor(0).setDepth(203).setOrigin(0.5);
     objects.push(bottomBorder);
 
@@ -7954,13 +14492,13 @@ _applyMirrorEffect() {
   }
   _openOnlineLevelsScene(params = {}) {
     if (this._onlineLevelsOverlay) return;
-
+    this._uhdContext = 'online';
     const sw = screenWidth;
     const sh = screenHeight;
     const isFeatured = (params.type === 6);
     const shell = this._openListScene(
       isFeatured ? "" : "Online Levels",
-      150,
+      180,
       () => { this._onlineLevelsOverlay = null; this._openCreatorMenu(); }
     );
     const { objects, listLeft, listTop, panelW, panelH,
@@ -8035,99 +14573,26 @@ _applyMirrorEffect() {
     const _panelMask = _panelMaskShape.createGeometryMask();
     objects.push(_panelMaskShape);
 
-    const fmtNum = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    const lengthNames = ["Tiny", "Short", "Medium", "Long", "XL", "Plat."];
-    const diffMap = {
-      0: "difficulty_00_btn_001.png", 10: "difficulty_01_btn_001.png",
-      20: "difficulty_02_btn_001.png", 30: "difficulty_03_btn_001.png",
-      40: "difficulty_04_btn_001.png", 50: "difficulty_05_btn_001.png"
-    };
-
     const _buildLevelCell = (levelData, rowIdx) => {
-      const rowH = 150;
+      const rowH = 180;
       const rowY = _panelBoundaryTop + rowIdx * rowH - scrollOffsetY;
       const cellObjs = [];
+      const rx = listLeft;
       const boundaryTop = _panelBoundaryTop;
       const boundaryBottom = _panelBoundaryBottom;
-
-      if (rowY + rowH < boundaryTop || rowY > boundaryBottom) return cellObjs;
-
-      // divider line between rows
-      if (rowIdx > 0) {
-        const div = this.add.rectangle(listLeft + panelW / 2, rowY, panelW - 10, 1.5, 0x000000, 0.6)
-          .setScrollFactor(0).setDepth(203).setOrigin(0.5, 0.5).setMask(_panelMask);
+      if (rowIdx > 0 && rowY >= boundaryTop && rowY <= boundaryBottom) {
+        const div = this.add.rectangle(rx + panelW / 2, rowY, panelW - 10, 1.5, 0x000000, 0.6)
+          .setScrollFactor(0).setDepth(203).setOrigin(0.5, 0.5);
         cellObjs.push(div);
       }
 
-      const cy = rowY + rowH / 2;
-      const diffVal = levelData.difficulty || 0;
-      const diffFrame = diffMap[diffVal] || "difficulty_00_btn_001.png";
-      const diffIcon = this.add.image(listLeft + 50, cy - 15, "GJ_GameSheet03", diffFrame)
-        .setScrollFactor(0).setDepth(204).setScale(0.7).setMask(_panelMask);
-      cellObjs.push(diffIcon);
-
-      // stars
-      if (levelData.stars > 0) {
-        const starTxt = this.add.bitmapText(listLeft + 30, cy + 22, "bigFont", String(levelData.stars), 18)
-          .setScrollFactor(0).setDepth(204).setOrigin(0.5, 0.5).setMask(_panelMask);
-        const starIcon = this.add.image(listLeft + 46, cy + 22, "GJ_WebSheet", "GJ_bigStar_001.png")
-          .setScrollFactor(0).setDepth(204).setScale(0.22).setMask(_panelMask);
-        cellObjs.push(starTxt, starIcon);
-      }
-
-      // coins
-      if (levelData.coins > 0) {
-        const coinFrame = levelData.coinsVerified ? "GJ_coinsIcon_001.png" : "GJ_coinsIcon2_001.png";
-        for (let ci = 0; ci < Math.min(levelData.coins, 3); ci++) {
-          const coin = this.add.image(listLeft + 24 + ci * 14, cy + 38, "GJ_GameSheet03", coinFrame)
-            .setScrollFactor(0).setDepth(204).setScale(0.45).setMask(_panelMask);
-          cellObjs.push(coin);
-        }
-      }
-
-      // level name
-      const name = this.add.bitmapText(listLeft + 95, cy - 40, "bigFont", levelData.name.slice(0, 26), 26)
-        .setScrollFactor(0).setDepth(204).setMask(_panelMask);
-      cellObjs.push(name);
-
-      // author
-      const author = this.add.bitmapText(listLeft + 95, cy - 10, "goldFont", "By " + levelData.author, 20)
-        .setScrollFactor(0).setDepth(204).setMask(_panelMask);
-      cellObjs.push(author);
-
-      // song name
-      const song = this.add.bitmapText(listLeft + 95, cy + 14, "bigFont", levelData.songName.slice(0, 30), 16)
-        .setScrollFactor(0).setDepth(204).setTint(0x9999ff).setMask(_panelMask);
-      cellObjs.push(song);
-
-      // stats row: length, downloads, likes
-      const statsY = cy + 38;
-      const timeIcon = this.add.image(listLeft + 95, statsY, "GJ_GameSheet03", "GJ_timeIcon_001.png")
-        .setScrollFactor(0).setDepth(204).setScale(0.5).setMask(_panelMask);
-      const lenTxt = this.add.bitmapText(listLeft + 110, statsY, "goldFont", lengthNames[levelData.length] || "?", 18)
-        .setScrollFactor(0).setDepth(204).setOrigin(0, 0.5).setMask(_panelMask);
-      const dlIcon = this.add.image(listLeft + 185, statsY, "GJ_GameSheet03", "GJ_downloadsIcon_001.png")
-        .setScrollFactor(0).setDepth(204).setScale(0.5).setMask(_panelMask);
-      const dlTxt = this.add.bitmapText(listLeft + 200, statsY, "goldFont", fmtNum(levelData.downloads), 18)
-        .setScrollFactor(0).setDepth(204).setOrigin(0, 0.5).setMask(_panelMask);
-      const likeIcon = this.add.image(listLeft + 310, statsY, "GJ_GameSheet03", "GJ_likesIcon_001.png")
-        .setScrollFactor(0).setDepth(204).setScale(0.5).setMask(_panelMask);
-      const likeTxt = this.add.bitmapText(listLeft + 325, statsY, "goldFont", fmtNum(levelData.likes), 18)
-        .setScrollFactor(0).setDepth(204).setOrigin(0, 0.5).setMask(_panelMask);
-      cellObjs.push(timeIcon, lenTxt, dlIcon, dlTxt, likeIcon, likeTxt);
-
-      // play button on right
-      const playBtn = this.add.image(listLeft + panelW - 55, cy, "GJ_GameSheet03", "GJ_playBtn2_001.png")
-        .setScrollFactor(0).setDepth(204).setScale(0.9).setFlipY(true).setAngle(90)
-        .setInteractive().setMask(_panelMask);
-      this._makeBouncyButton(playBtn, 1, () => {
-        if (levelData.id) this._openLevelInfoScreen(levelData.id, levelData);
-      }, () => true);
-      cellObjs.push(playBtn);
-
       return cellObjs;
     };
-
+    const _parseKV = (str) => {
+      const m = {}, p = str.split(":");
+      for (let i = 0; i + 1 < p.length; i += 2) m[p[i]] = p[i + 1];
+      return m;
+    };
     const _setPage = async (page) => {
       if (_loading) return;
       _loading = true;
@@ -8135,79 +14600,128 @@ _applyMirrorEffect() {
       for (const o of activeCellObjs) if (o && o.destroy) o.destroy();
       activeCellObjs = [];
       clearRows();
-      if (isFeatured && this._featuredPageUpdate) this._featuredPageUpdate(page);
+      if (isFeatured && this._featuredPageUpdate) {
+        this._featuredPageUpdate(page);
+      }
 
       spinSprite.setVisible(true);
       refreshBtn.setVisible(false);
       pageLbl.setVisible(false);
-      prevBtn.setScale(1); prevBtn._pressed = false; prevBtn.setVisible(false);
-      nextBtn.setScale(1); nextBtn._pressed = false; nextBtn.setVisible(false);
+      this.tweens.killTweensOf(prevBtn, "scale");
+      prevBtn.setScale(1);
+      prevBtn._pressed = false;
+      prevBtn.setVisible(false);
+      this.tweens.killTweensOf(nextBtn, "scale");
+      nextBtn.setScale(1);
+      nextBtn._pressed = false;
+      nextBtn.setVisible(false);
 
       try {
-        let levels = cache[page];
-        if (!levels) {
-          // use gdbrowser api — returns clean json, no proxy needed
-          const typeParam = params.type !== undefined ? `&type=${params.type}` : "";
-          const res = await fetch(`https://gdbrowser.com/api/search/*?page=${page}&count=10${typeParam}`);
+        let response = cache[page];
+        if (!response) {
+          const PROXY = (window._gdProxyUrl || "").replace(/\/$/, "");
+          if (!PROXY) throw new Error("no proxy configured");
+          const body = Object.entries({ secret: "Wmfd2893gb7", page, ...params })
+            .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+          let retryCount = 0;
+          const maxRetries = 3;
+          let res;
+          while (retryCount < maxRetries) {
+            res = await fetch(`${PROXY}/getGJLevels21.php`, {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body
+            });
+            
+            if (res.status === 429) {
+              retryCount++;
+              if (retryCount >= maxRetries) {
+                throw new Error(`rate limited after ${maxRetries} retries`);
+              }
+              await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
+              continue;
+            }
+            break;
+          }
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          levels = await res.json();
-          if (!levels || levels === "-1" || !levels.length) throw new Error("no results");
-          cache[page] = levels;
+          response = await res.text();
+          if (!response || response === "-1") throw new Error("no results");
+          cache[page] = response;
         }
-
         spinSprite.setVisible(false);
         refreshBtn.setVisible(true);
         pageLbl.setVisible(true);
         prevBtn.setVisible(page > 0);
+        nextBtn.setVisible(true);
+        const sections   = response.split("#");
+        const levelStrs  = (sections[0] || "").split("|").filter(Boolean);
+        const playerStrs = (sections[1] || "").split("|").filter(Boolean);
+        const songStrs   = (sections[2] || "").split("~:~").filter(Boolean);
+        const pageInfo   = (sections[3] || "0:0:10").split(":");
 
-        const total = levels[0]?.results || 0;
-        const count = 10;
-        pageLbl.setText(`${page * count + 1} to ${(page + 1) * count} of ${fmtNum(total)}`);
-        nextBtn.setVisible(levels.length >= count);
-
+        const playerMap = {};
+        for (const ps of playerStrs) {
+          const p = ps.split(":");
+          if (p.length >= 2) playerMap[p[0]] = p[1];
+        }
+        const songMap = {};
+        for (const ss of songStrs) {
+          const sp = ss.split("~|~"), sm = {};
+          for (let i = 0; i + 1 < sp.length; i += 2) sm[sp[i]] = sp[i + 1];
+          if (sm["1"]) songMap[sm["1"]] = sm["2"] || "";
+        }
+        const total  = parseInt(pageInfo[0]) || 0;
+        const offset = parseInt(pageInfo[1]) || 0;
+        const count  = parseInt(pageInfo[2]) || 10;
+        const start  = offset + 1;
+        const end    = count * (page + 1);
+        pageLbl.setText(`${start} to ${end} of ${total}`);
+        const maxPages = Math.ceil(total / count);
+        const hasNextPage = (page + 1) < maxPages;
+        nextBtn.setVisible(hasNextPage);
         scrollOffsetY = 0;
-        _lastLevelData = levels.map(x => ({
-          id:            String(x.id),
-          name:          x.name || "Unknown",
-          author:        x.author || "Unknown",
-          difficulty:    x.difficultyFace ? (() => {
-            const f = x.difficultyFace.replace(/-epic$|-legendary$|-mythic$|-featured$/, "");
-            const faceToVal = {
-              "unrated": 0, "auto": 0, "easy": 10, "normal": 20,
-              "hard": 30, "harder": 40, "insane": 50,
-              "demon": 50, "demon-easy": 50, "demon-medium": 50,
-              "demon-hard": 50, "demon-insane": 50, "demon-extreme": 50
-            };
-            return faceToVal[f] ?? 0;
-          })() : 0,
-          diffFrame:     (() => {
-            const f = (x.difficultyFace || "unrated").replace(/-epic$|-legendary$|-mythic$|-featured$/, "");
-            const faceToFrame = {
-              "unrated": "difficulty_00_btn_001.png",
-              "auto":    "difficulty_00_btn_001.png",
-              "easy":    "difficulty_01_btn_001.png",
-              "normal":  "difficulty_02_btn_001.png",
-              "hard":    "difficulty_03_btn_001.png",
-              "harder":  "difficulty_04_btn_001.png",
-              "insane":  "difficulty_05_btn_001.png",
-              "demon":            "difficulty_06_btn_001.png",
-              "demon-easy":       "difficulty_06_btn_001.png",
-              "demon-medium":     "difficulty_06_btn_001.png",
-              "demon-hard":       "difficulty_06_btn_001.png",
-              "demon-insane":     "difficulty_06_btn_001.png",
-              "demon-extreme":    "difficulty_06_btn_001.png",
-            };
-            return faceToFrame[f] || "difficulty_00_btn_001.png";
-          })(),
-          downloads:     x.downloads || 0,
-          length:        typeof x.length === "number" ? x.length : ["Tiny","Short","Medium","Long","XL","Plat."].indexOf(x.length),
-          likes:         x.likes || 0,
-          stars:         x.stars || 0,
-          coins:         x.coins || 0,
-          coinsVerified: !!x.verifiedCoins,
-          songName:      (x.songName || "").replace(/[^ -~]/g, "").trim() || x.songName || ""
-        }));
-        _lastLevelStrs = _lastLevelData.map(l => l.id);
+        // wip
+        _lastLevelStrs = levelStrs;
+        _lastLevelData = levelStrs.map((ls) => {
+          const m = _parseKV(ls);
+          const rawLikes = parseInt(m["14"]) || 0;
+          const diffDenom = parseInt(m["8"]) || 0;
+          const isDemon   = parseInt(m["17"]) === 1;
+          const isAuto    = parseInt(m["25"]) === 1;
+          let diffIdx = 0;
+          if (isAuto) {
+            diffIdx = 11;
+          } else if (isDemon) {
+            const d9 = parseInt(m["9"]);
+            const d43 = parseInt(m["43"]);
+            if (!isNaN(d9) && d9 >= 1 && d9 <= 5) {
+              diffIdx = [6, 7, 8, 9, 10][d9 - 1] ?? 8;
+            } else if (!isNaN(d43)) {
+              const demonMap43 = { 3: 6, 4: 7, 0: 8, 5: 9, 6: 10 };
+              diffIdx = demonMap43.hasOwnProperty(d43) ? demonMap43[d43] : 8;
+            } else {
+              diffIdx = 8;
+            }
+          } else {
+            const denomIdx = Math.min(6, Math.max(0, Math.round(diffDenom / 10)));
+            diffIdx = [0, 0, 1, 2, 3, 4, 5][denomIdx];
+          }
+          return {
+            id:            m["1"]  || null,
+            name:          m["2"]  || "Unknown",
+            author:        playerMap[m["6"]] || ("Player " + (m["6"] || "?")),
+            difficulty:    diffIdx,
+            downloads:     parseInt(m["10"]) || 0,
+            length:        parseInt(m["15"]) || 0,
+            likes:         rawLikes,
+            stars:         parseInt(m["18"]) || 0,
+            coins:         parseInt(m["37"]) || 0,
+            coinsVerified: m["38"] === "1",
+            songName:      m["35"]
+              ? (songMap[m["35"]] || ("Song #" + m["35"]))
+              : ("Song #" + (m["12"] || "0"))
+          };
+        });
         _lastLevelData.forEach((levelData, idx) => {
           const cellObjs = _buildLevelCell(levelData, idx);
           activeCellObjs.push(...cellObjs);
@@ -8217,7 +14731,6 @@ _applyMirrorEffect() {
       } catch (err) {
         spinSprite.setVisible(false);
         refreshBtn.setVisible(true);
-        console.warn("featured tab error:", err);
       }
       _loading = false;
     };
@@ -8229,7 +14742,7 @@ _applyMirrorEffect() {
     const _onWheel = (pointer, gameObjects, deltaX, deltaY) => {
       if (pointer.x < listLeft || pointer.x > listLeft + panelW) return;
       if (pointer.y < listTop  || pointer.y > listTop + panelH) return;
-      const maxScroll = Math.max(0, (_lastLevelStrs ? _lastLevelStrs.length : 0) * 150 - (panelH - 33));
+      const maxScroll = Math.max(0, (_lastLevelStrs ? _lastLevelStrs.length : 0) * 180 - (panelH - 33));
       const newScrollOffset = Math.max(0, Math.min(scrollOffsetY + deltaY * 0.5, maxScroll));
       if (newScrollOffset !== scrollOffsetY) {
         scrollOffsetY = newScrollOffset;
@@ -8266,7 +14779,7 @@ _applyMirrorEffect() {
       if (pointer.y < listTop  || pointer.y > listTop + panelH) return;
       const deltaY = dragStartY - pointer.y;
       if (Math.abs(deltaY) < dragThreshold) return;
-      const maxScroll = Math.max(0, (_lastLevelStrs ? _lastLevelStrs.length : 0) * 150 - (panelH - 33));
+      const maxScroll = Math.max(0, (_lastLevelStrs ? _lastLevelStrs.length : 0) * 180 - (panelH - 33));
       let newScrollOffset = dragStartScrollOffset + deltaY * 0.5;
       const elasticLimit = 100;
       if (newScrollOffset < -elasticLimit) {
@@ -8288,7 +14801,7 @@ _applyMirrorEffect() {
 
     const onDragEnd = () => {
       isDragging = false;
-      const maxScroll = Math.max(0, (_lastLevelStrs ? _lastLevelStrs.length : 0) * 150 - (panelH - 33));
+      const maxScroll = Math.max(0, (_lastLevelStrs ? _lastLevelStrs.length : 0) * 180 - (panelH - 33));
       let targetScrollOffset = scrollOffsetY;
       if (scrollOffsetY < 0) {
         targetScrollOffset = 0;

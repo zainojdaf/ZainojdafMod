@@ -185,7 +185,8 @@ class BootScene extends Phaser.Scene {
       "I don't know how this works...",
       "Why u have to be mad?",
       "It is only game...",
-      "Unlock new icons and colors by completing achievements"
+      "Unlock new icons and colors by completing achievements",
+      "y=mx+b"
     ];
     const sliderOriginX = cx - 105;
     const sliderOriginY = cy + 110;
@@ -213,7 +214,7 @@ class BootScene extends Phaser.Scene {
       const msg = LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
       this.add.bitmapText(cx, cy + 187, "goldFont", msg, 30).setOrigin(0.5);
       const robtopLogo = this.add.image(cx, cy - 120, "GJ_LaunchSheet", "RobTopLogoBig_001.png").setOrigin(0.5).setScale(0.8);
-      const gjLogo = this.add.image(cx, cy, "GJ_LaunchSheet", "GJ_logo_001.png").setOrigin(0.5);
+      const gjLogo = this.add.image(cx, cy, "GJ_WebSheet", "gj_logo.png").setOrigin(0.5);
       this.children.bringToTop(robtopLogo);
       this.children.bringToTop(gjLogo);
       if (window.gameCache) {
@@ -239,13 +240,16 @@ class BootScene extends Phaser.Scene {
       this.load.atlas("GJ_GameSheet02", "assets/sheets/GJ_GameSheet02.png", "assets/sheets/GJ_GameSheet02.json");
       this.load.atlas("GJ_GameSheet03", "assets/sheets/GJ_GameSheet03.png", "assets/sheets/GJ_GameSheet03.json");
       this.load.atlas("GJ_GameSheet04", "assets/sheets/GJ_GameSheet04.png", "assets/sheets/GJ_GameSheet04.json");
+      this.load.atlas("GJ_GameSheet04_UHD", "assets/sheets/GJ_GameSheet04_UHD.png", "assets/sheets/GJ_GameSheet04_UHD.json");
       this.load.atlas("GJ_GameSheetEditor", "assets/sheets/GJ_GameSheetEditor.png", "assets/sheets/GJ_GameSheetEditor.json");
       this.load.atlas("GJ_GameSheetGlow", "assets/sheets/GJ_GameSheetGlow.png", "assets/sheets/GJ_GameSheetGlow.json");
       this.load.atlas("GJ_GameSheetIcons", "assets/sheets/GJ_GameSheetIcons.png", "assets/sheets/GJ_GameSheetIcons.json");
-      this.load.atlas("GJ_GeodeSheet", "assets/sheets/GJ_GeodeSheet.png", "assets/sheets/GJ_GeodeSheet.json");
+      this.load.json("Spider_AnimDesc", "assets/sheets/Spider_AnimDesc.json");
+      this.load.json("Robot_AnimDesc", "assets/sheets/Robot_AnimDesc.json");
       this.load.atlas("GJ_LaunchSheet", "assets/sheets/GJ_LaunchSheet.png", "assets/sheets/GJ_LaunchSheet.json");
       this.load.atlas("player_ball_00", "assets/sheets/player_ball_00.png", "assets/sheets/player_ball_00.json");
       this.load.atlas("player_dart_00", "assets/sheets/player_dart_00.png", "assets/sheets/player_dart_00.json");
+      this.load.atlas("CCControlColourPickerSpriteSheet-uhd", "assets/sheets/CCControlColourPickerSpriteSheet-uhd.png", "assets/sheets/CCControlColourPickerSpriteSheet-uhd.json");
       this.load.image("bigFont", "assets/fonts/bigFont.png");
       this.load.text("bigFontFnt", "assets/fonts/bigFont.fnt");
       this.load.image("square04_001", "assets/sprites/square04_001.png");
@@ -274,6 +278,12 @@ class BootScene extends Phaser.Scene {
       this.load.image("GJ_moveBtn", "assets/sprites/GJ_moveBtn.png");
       this.load.image("GJ_moveSBtn", "assets/sprites/GJ_moveSBtn.png");
       this.load.image("slidergroove2", "assets/sprites/slidergroove2.png");
+      this.load.image("macroBot", "assets/sprites/macroBot.png");
+      this.load.image("importMacro", "assets/sprites/importMacro.png");
+      this.load.image("playbackMacro", "assets/sprites/playbackMacro.png");
+      this.load.image("stopPlayback", "assets/sprites/stopPlayback.png");
+      this.load.image("recordMacro", "assets/sprites/recordMacro.png");
+      this.load.image("stopRecord", "assets/sprites/stopRecord.png");
 
       for (let i = 1; i < 23; i++) {
         let index = i - 1;
@@ -294,10 +304,10 @@ class BootScene extends Phaser.Scene {
       this.load.audio("menu_music", "assets/music/menuLoop.mp3");
       this.load.audio("StayInsideMe", "assets/music/StayInsideMe.mp3");
 
-      for (const lvlarray of window.allLevels) {
+      /*for (const lvlarray of window.allLevels) {
         this.load.text(lvlarray[2], "assets/levels/" + lvlarray[2].split("_")[1] + ".txt");
         this.load.audio(lvlarray[0], "assets/music/" + (lvlarray[4] ? lvlarray[4] : lvlarray[1].replaceAll(" ", "")) + ".mp3");
-      }
+      }*/
 
       this.load.audio("explode_11", "assets/sfx/explode_11.ogg");
       this.load.audio("endStart_02", "assets/sfx/endStart_02.ogg");
