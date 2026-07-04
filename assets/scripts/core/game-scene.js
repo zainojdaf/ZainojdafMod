@@ -4127,6 +4127,325 @@ _buildSettingsPopup() {
       this._howToPlayPopup = null;
     }
   }
+
+  // ---------------------------------------------------------------------
+  // ACCOUNT / LOGIN / REGISTER POPUP
+  // Built entirely from the game's real GD sprites (GJ_square01 panel,
+  // GJ_button_01 pill buttons, GJ_closeBtn_001 close icon, bigFont/goldFont)
+  // so it matches the rest of the game instead of being an HTML overlay.
+  // ---------------------------------------------------------------------
+  _makeAcctPanelBg(container, w, h) {
+    const borderSize = this.textures.get("GJ_square01").source[0].width * 0.325;
+    const bg = this._drawScale9(0, 0, w, h, "GJ_square01", borderSize, 0xffffff, 1);
+    container.add(bg);
+    return bg;
+  }
+
+  _makeAcctButton(container, x, y, w, h, label, tint, onClick) {
+    const btnContainer = this.add.container(x, y);
+    const borderSize = this.textures.get("GJ_button01").source[0].width * 0.3;
+    const bg = this._drawScale9(0, 0, w, h, "GJ_button01", borderSize, tint, 1);
+    const txt = this.add.bitmapText(0, -2, "bigFont", label, 30).setOrigin(0.5, 0.5);
+    btnContainer.add([bg, txt]);
+    const hitZone = this.add.zone(0, 0, w, h).setInteractive();
+    btnContainer.add(hitZone);
+    this._makeBouncyButton(hitZone, 1, () => onClick());
+    container.add(btnContainer);
+    return btnContainer;
+  }
+
+  // Custom in-canvas text field (NOT a real <input>) so typing never reaches
+  // the page's DOM focus. We still must disable this.input.keyboard while
+  // the popup is open (done in _buildAccountPopup/_closeAccountPopup) so
+  // Phaser's own bound keys (W, Z, L, Space, etc.) don't fire from the same
+  // keystrokes at the same time.
+  _makeAcctTextField(container, x, y, w, fieldState, opts) {
+    opts = opts || {};
+    const h = 56;
+    const box = this.add.graphics();
+    box.fillStyle(0x000000, 0.35).fillRoundedRect(x - w / 2, y - h / 2, w, h, 12);
+    container.add(box);
+
+    const displayText = this.add.bitmapText(x - w / 2 + 16, y, "bigFont", "", 28).setOrigin(0, 0.5);
+    container.add(displayText);
+
+    const cursor = this.add.bitmapText(0, y, "bigFont", "|", 28).setOrigin(0, 0.5).setVisible(false);
+    container.add(cursor);
+
+    const hitZone = this.add.zone(x, y, w, h).setInteractive();
+    container.add(hitZone);
+
+    const render = () => {
+      const shown = opts.password ? "\u2022".repeat(fieldState.value.length) : fieldState.value;
+      displayText.setText(shown);
+      const isActive = this._acctActiveField === fieldState;
+      cursor.setPosition(x - w / 2 + 16 + displayText.width + 2, y);
+      cursor.setVisible(isActive && this._acctCursorOn);
+    };
+    fieldState._render = render;
+    render();
+
+    hitZone.on("pointerdown", () => {
+      this._acctActiveField = fieldState;
+      this._refreshAllAcctFields();
+    });
+
+    return { box, displayText, cursor, hitZone };
+  }
+
+  _refreshAllAcctFields() {
+    if (!this._acctFieldStates) return;
+    for (const f of this._acctFieldStates) f._render();
+  }
+
+  _buildAccountPopup() {
+    if (this._accountPopup) return;
+
+    try { this.input.keyboard.disableGlobalCapture(); } catch (e) {}
+    try { this.input.keyboard.enabled = false; } catch (e) {}
+
+    const GREEN = 0x00e719;
+    const RED = 0xfa3a3a;
+    const xPos = screenWidth / 2;
+    const yPos = 320;
+    const panelW = 700;
+    const panelH = 580;
+
+    const root = this.add.container(0, 0).setScrollFactor(0).setDepth(300);
+    this._accountPopup = root;
+
+    const dim = this.add.rectangle(xPos, yPos, screenWidth, screenHeight, 0, 100 / 255).setInteractive();
+    root.add(dim);
+
+    const panel = this.add.container(xPos, yPos);
+    root.add(panel);
+    this._makeAcctPanelBg(panel, panelW, panelH);
+
+    const closeBtn = this.add.image(-panelW / 2, -panelH / 2, "GJ_WebSheet", "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
+    this._expandHitArea(closeBtn, 2);
+    this._makeBouncyButton(closeBtn, 0.8, () => this._closeAccountPopup());
+    panel.add(closeBtn);
+
+    // ---------------- HOME VIEW ----------------
+    const homeView = this.add.container(0, 0);
+    panel.add(homeView);
+    const homeTitle = this.add.bitmapText(0, -panelH / 2 + 55, "bigFont", "Account", 46).setOrigin(0.5, 0.5);
+    homeView.add(homeTitle);
+
+    const loggedIn = !!(window.AccountAPI && window.AccountAPI.currentUser);
+    if (loggedIn) {
+      const nameTxt = this.add.bitmapText(0, -60, "goldFont", window.AccountAPI.currentUser.username, 40).setOrigin(0.5, 0.5);
+      homeView.add(nameTxt);
+      this._makeAcctButton(homeView, 0, 60, 400, 68, "Log Out", RED, () => this._doAccountLogout());
+    } else {
+      const line1 = this.add.bitmapText(0, -110, "goldFont", "Not logged in", 28).setOrigin(0.5, 0.5);
+      const line2 = this.add.bitmapText(0, -75, "bigFont", "Create an account to back up", 22).setOrigin(0.5, 0.5);
+      const line3 = this.add.bitmapText(0, -48, "bigFont", "and load your data from the cloud", 22).setOrigin(0.5, 0.5);
+      homeView.add([line1, line2, line3]);
+      this._makeAcctButton(homeView, 0, 20, 460, 68, "Log In", GREEN, () => this._showAccountView("login"));
+      this._makeAcctButton(homeView, 0, 105, 460, 68, "Register", RED, () => this._showAccountView("register"));
+    }
+
+    // ---------------- LOGIN VIEW ----------------
+    const loginView = this.add.container(0, 0).setVisible(false);
+    panel.add(loginView);
+    const loginTitle = this.add.bitmapText(0, -panelH / 2 + 55, "bigFont", "Login", 46).setOrigin(0.5, 0.5);
+    loginView.add(loginTitle);
+
+    const fieldLeftX = -panelW / 2 + 55;
+    const fieldW = panelW - 110;
+
+    const loginErrorTxt = this.add.bitmapText(0, -150, "bigFont", "", 22).setOrigin(0.5, 0.5).setTint(0xff3b3b);
+    loginView.add(loginErrorTxt);
+
+    const loginUserLabel = this.add.bitmapText(fieldLeftX, -110, "bigFont", "Username:", 24).setOrigin(0, 0.5);
+    loginView.add(loginUserLabel);
+    const loginUserState = { value: "" };
+    const loginUserField = this._makeAcctTextField(loginView, 0, -75, fieldW, loginUserState, {});
+
+    const loginPassLabel = this.add.bitmapText(fieldLeftX, -30, "bigFont", "Password:", 24).setOrigin(0, 0.5);
+    loginView.add(loginPassLabel);
+    const loginPassState = { value: "" };
+    const loginPassField = this._makeAcctTextField(loginView, 0, 5, fieldW, loginPassState, { password: true });
+
+    this._makeAcctButton(loginView, -125, 100, 220, 68, "Cancel", RED, () => this._showAccountView("home"));
+    this._makeAcctButton(loginView, 125, 100, 220, 68, "Login", GREEN, () => this._doAccountLogin());
+
+    // ---------------- REGISTER VIEW ----------------
+    const registerView = this.add.container(0, 0).setVisible(false);
+    panel.add(registerView);
+    const registerTitle = this.add.bitmapText(0, -panelH / 2 + 45, "bigFont", "Register Account", 38).setOrigin(0.5, 0.5);
+    registerView.add(registerTitle);
+
+    const regErrorTxt = this.add.bitmapText(0, -218, "bigFont", "", 20).setOrigin(0.5, 0.5).setTint(0xff3b3b);
+    registerView.add(regErrorTxt);
+
+    const regUserLabel = this.add.bitmapText(fieldLeftX, -195, "bigFont", "Username:", 22).setOrigin(0, 0.5);
+    const regUserNote = this.add.bitmapText(fieldLeftX + regUserLabel.width + 8, -195, "bigFont", "(shown to other players)", 15).setOrigin(0, 0.5).setTint(0xd8d8d8);
+    registerView.add([regUserLabel, regUserNote]);
+    const regUserState = { value: "" };
+    this._makeAcctTextField(registerView, 0, -163, fieldW, regUserState, {});
+
+    const regPassLabel = this.add.bitmapText(fieldLeftX, -122, "bigFont", "Password:", 22).setOrigin(0, 0.5);
+    registerView.add(regPassLabel);
+    const regPassState = { value: "" };
+    this._makeAcctTextField(registerView, 0, -90, fieldW, regPassState, { password: true });
+
+    const regPass2Label = this.add.bitmapText(fieldLeftX, -49, "bigFont", "Confirm Password:", 22).setOrigin(0, 0.5);
+    registerView.add(regPass2Label);
+    const regPass2State = { value: "" };
+    this._makeAcctTextField(registerView, 0, -17, fieldW, regPass2State, { password: true });
+
+    const regEmailLabel = this.add.bitmapText(fieldLeftX, 24, "bigFont", "Email:", 22).setOrigin(0, 0.5);
+    const regEmailNote = this.add.bitmapText(fieldLeftX + regEmailLabel.width + 8, 24, "bigFont", "(optional)", 15).setOrigin(0, 0.5).setTint(0xd8d8d8);
+    registerView.add([regEmailLabel, regEmailNote]);
+    const regEmailState = { value: "" };
+    this._makeAcctTextField(registerView, 0, 56, fieldW, regEmailState, {});
+
+    this._makeAcctButton(registerView, -125, panelH / 2 - 55, 220, 68, "Cancel", RED, () => this._showAccountView("home"));
+    this._makeAcctButton(registerView, 125, panelH / 2 - 55, 220, 68, "Submit", GREEN, () => this._doAccountRegister());
+
+    this._acctViews = { home: homeView, login: loginView, register: registerView };
+    this._acctFieldStates = [loginUserState, loginPassState, regUserState, regPassState, regPass2State, regEmailState];
+    this._acctErrorTxts = { login: loginErrorTxt, register: regErrorTxt };
+    this._acctErrorFieldPos = {
+      regUsername: -195, regEmail: 24, regPassword: -49,
+    };
+    this._acctActiveField = null;
+    this._acctCursorOn = true;
+
+    this._acctCursorInterval = setInterval(() => {
+      this._acctCursorOn = !this._acctCursorOn;
+      this._refreshAllAcctFields();
+    }, 500);
+
+    dim.on("pointerdown", () => { this._acctActiveField = null; this._refreshAllAcctFields(); });
+
+    this._acctKeyHandler = (event) => {
+      if (!this._acctActiveField) return;
+      const field = this._acctActiveField;
+      if (event.key === "Backspace") {
+        field.value = field.value.slice(0, -1);
+        event.preventDefault();
+      } else if (event.key === "Enter" || event.key === "Tab") {
+        this._acctActiveField = null;
+        event.preventDefault();
+      } else if (event.key.length === 1 && field.value.length < 64) {
+        field.value += event.key;
+        event.preventDefault();
+      } else {
+        return;
+      }
+      this._acctCursorOn = true;
+      this._refreshAllAcctFields();
+    };
+    window.addEventListener("keydown", this._acctKeyHandler);
+
+    this._acctState = {
+      loginUser: loginUserState, loginPass: loginPassState,
+      regUser: regUserState, regPass: regPassState, regPass2: regPass2State, regEmail: regEmailState,
+    };
+
+    panel.setScale(0.7);
+    this.tweens.add({ targets: panel, scale: 1, duration: 400, ease: "Bounce.Out" });
+    // homeView is visible by default (login/register start hidden), so no
+    // extra view-switch call is needed here.
+  }
+
+  // Full rebuild used after a login/register/logout succeeds, since the
+  // home view's content (logged-in vs logged-out) depends on account state
+  // that was only computed once at popup-build time.
+  _refreshAccountPopup() {
+    this._closeAccountPopup(true);
+    this._buildAccountPopup();
+  }
+
+  _showAccountView(name) {
+    if (!this._acctViews) return;
+    for (const key in this._acctViews) this._acctViews[key].setVisible(key === name);
+    this._acctActiveField = null;
+    if (this._acctErrorTxts) {
+      if (this._acctErrorTxts.login) this._acctErrorTxts.login.setText("");
+      if (this._acctErrorTxts.register) { this._acctErrorTxts.register.setText(""); this._acctErrorTxts.register.setY(-218); }
+    }
+  }
+
+  _setAcctError(view, message, fieldY) {
+    const txt = this._acctErrorTxts[view];
+    if (!txt) return;
+    txt.setText(message);
+    if (fieldY !== undefined) txt.setY(fieldY - 22);
+  }
+
+  async _doAccountLogin() {
+    const { loginUser, loginPass } = this._acctState;
+    if (!loginUser.value || !loginPass.value) {
+      this._setAcctError("login", "Please enter a username and password");
+      return;
+    }
+    try {
+      await window.AccountAPI.login(loginUser.value.trim(), loginPass.value);
+      this._refreshAccountPopup();
+    } catch (err) {
+      this._setAcctError("login", err.message || "Login failed");
+    }
+  }
+
+  async _doAccountRegister() {
+    const { regUser, regPass, regPass2, regEmail } = this._acctState;
+    if (!regUser.value.trim()) {
+      this._setAcctError("register", "Username is required", this._acctErrorFieldPos.regUsername);
+      return;
+    }
+    if (regPass.value !== regPass2.value) {
+      this._setAcctError("register", "Passwords do not match", this._acctErrorFieldPos.regPassword);
+      return;
+    }
+    try {
+      await window.AccountAPI.register(regUser.value.trim(), regEmail.value.trim(), regPass.value, regPass2.value);
+      this._refreshAccountPopup();
+    } catch (err) {
+      const msg = err.message || "Registration failed";
+      if (/username/i.test(msg)) {
+        this._setAcctError("register", msg, this._acctErrorFieldPos.regUsername);
+      } else if (/email/i.test(msg)) {
+        this._setAcctError("register", msg, this._acctErrorFieldPos.regEmail);
+      } else if (/match/i.test(msg)) {
+        this._setAcctError("register", msg, this._acctErrorFieldPos.regPassword);
+      } else {
+        this._setAcctError("register", msg, this._acctErrorFieldPos.regUsername);
+      }
+    }
+  }
+
+  async _doAccountLogout() {
+    await window.AccountAPI.logout();
+    window.AccountAPI.clearClientData();
+    this._refreshAccountPopup();
+  }
+
+  _closeAccountPopup(keepKeyboardDisabled) {
+    if (this._acctCursorInterval) {
+      clearInterval(this._acctCursorInterval);
+      this._acctCursorInterval = null;
+    }
+    if (this._acctKeyHandler) {
+      window.removeEventListener("keydown", this._acctKeyHandler);
+      this._acctKeyHandler = null;
+    }
+    if (this._accountPopup) {
+      this._accountPopup.destroy();
+      this._accountPopup = null;
+    }
+    this._acctViews = null;
+    this._acctFieldStates = null;
+    this._acctErrorTxts = null;
+    this._acctActiveField = null;
+    if (!keepKeyboardDisabled) {
+      try { this.input.keyboard.enableGlobalCapture(); } catch (e) {}
+      try { this.input.keyboard.enabled = true; } catch (e) {}
+    }
+  }
   _buildUpdateLogPopup() {
     if (this._updateLogPopup || window.levelID) {
       return;
@@ -7517,7 +7836,7 @@ _applyMirrorEffect() {
         return grp;
     };
 
-    _makeSettingsBtn(_sColL, _sRow1Y, "Account",    _sBtnW2, true, () => { window.WDAccountUI && window.WDAccountUI.open(); });
+    _makeSettingsBtn(_sColL, _sRow1Y, "Account",    _sBtnW2, true, () => { this._buildAccountPopup(); });
     _makeSettingsBtn(_sColR, _sRow1Y, "How To Play", _sBtnW2, true, () => { this._buildHowToPlayPopup(); });
     _makeSettingsBtn(_sColL, _sRow2Y, "Options",    _sBtnW2, true,  () => { this._buildSettingsPopup(); });
     _makeSettingsBtn(_sColR, _sRow2Y, "Graphics",   _sBtnW2, true,  () => { this._buildGraphicsPopup(); });
