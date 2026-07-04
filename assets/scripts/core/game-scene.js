@@ -240,8 +240,8 @@ class GameScene extends Phaser.Scene {
     this._makeBouncyButton(this._profileBtn, 0.9, () => {
       // Profile screen not implemented yet — placeholder button only.
     }, () => this._menuActive);
-    this._profileNameText = this.add.bitmapText(0, 0, "bigFont", (window.AccountAPI && window.AccountAPI.currentUser) ? window.AccountAPI.currentUser.username : "Guest", 34)
-      .setScrollFactor(0).setDepth(30).setOrigin(0, 0.5);
+    this._profileNameText = this.add.bitmapText(0, 0, "goldFont", (window.AccountAPI && window.AccountAPI.currentUser) ? window.AccountAPI.currentUser.username : "Guest", 34)
+      .setScrollFactor(0).setDepth(30).setOrigin(0.5, 0.5);
     if (window.AccountAPI) {
       window.AccountAPI.checkSession().then(() => {
         if (this._profileNameText && this._profileNameText.active) {
@@ -5218,8 +5218,8 @@ _buildSettingsPopup() {
       this._profileBtn.y = 440;
     }
     if (this._profileNameText) {
-      this._profileNameText.x = 65 + (this._profileBtn ? (this._profileBtn.displayWidth / 2) + 10 : 40);
-      this._profileNameText.y = 440;
+      this._profileNameText.x = 65;
+      this._profileNameText.y = 440 - 38;
     }
     if (this._socialIcons && this._socialIcons.length > 0) {
       const _iconSpacing = 52;
