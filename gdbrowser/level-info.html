@@ -130,6 +130,13 @@ function closeLevelInfoPage() {
 	window.parent.postMessage({ type: 'WD_CLOSE_SEARCH' }, '*')
 }
 
+
+function fmtNum(n) {
+	n = parseInt(n) || 0
+	if (n >= 1000000) return (n/1000000).toFixed(1).replace(/\.0$/,"") + "M"
+	if (n >= 1000) return (n/1000).toFixed(1).replace(/\.0$/,"") + "K"
+	return n
+}
 const params = new URLSearchParams(window.location.search)
 const levelID = params.get('id')
 let lvl = null
@@ -152,13 +159,18 @@ fetch(`https://gdbrowser.com/api/level/${levelID}`)
 		$('#diffFace').attr('src', `assets/difficulties/${lvl.difficultyFace || 'unrated'}.png`)
 		$('#difficultytext').html((lvl.difficulty || "").replace(' ', "<br>"))
 
-		if (lvl.stars > 0) { $('#starText').text(lvl.stars); $('#starIcon').show() } else { $('.stars').hide() }
+		const isPlatformer = !!lvl.platformer
+		const ratingCount = isPlatformer ? (lvl.moons || lvl.stars || 0) : (lvl.stars || 0)
+		if (ratingCount > 0) {
+			$('#starText').text(ratingCount)
+			$('#starIcon').attr('src', isPlatformer ? 'assets/moon.png' : 'assets/star.png').show()
+		} else { $('.stars').hide() }
 
-		$('#statDownloads').text(lvl.downloads ?? 0)
-		$('#statLikes').text(lvl.likes ?? 0)
+		$('#statDownloads').text(fmtNum(lvl.downloads))
+		$('#statLikes').text(fmtNum(lvl.likes))
 		if (lvl.disliked) $('#likeImg').attr('src', 'assets/dislike.png').css('transform', 'translateY(20%)')
-		$('#statLength').text(lvl.length || "-")
-		$('#statOrbs').text(lvl.orbs ?? 0)
+		$('#statLength').text(isPlatformer ? 'Plat.' : (lvl.length || '-'))
+		$('#statOrbs').text(fmtNum(lvl.orbs))
 		if (!lvl.orbs) $('.orbs').hide()
 
 		if (lvl.description) { $('#lvlDesc').text(lvl.description); $('#descBox').show() }

@@ -5,6 +5,23 @@ window.AccountAPI = {
     return `${window._apiBase}${path}`;
   },
 
+  async _postJson(path, body) {
+    const res = await fetch(this._url(path), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    let data = {};
+    try { data = await res.json(); } catch {}
+    if (!res.ok) {
+      const err = new Error(data.error || 'Request failed');
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
+
   async checkSession() {
     try {
       const res = await fetch(this._url('/api/auth/me'), { credentials: 'include' });
@@ -21,27 +38,15 @@ window.AccountAPI = {
   },
 
   async login(username, password) {
-    const res = await fetch(this._url('/api/auth/login'), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Login failed');
+    const data = await this._postJson('/api/auth/login', { username, password });
     this.currentUser = data.user;
     return data.user;
   },
 
-  async register(username, email, password) {
-    const res = await fetch(this._url('/api/auth/register'), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, email: email || undefined, password }),
+  async register(username, email, password, confirmPassword) {
+    const data = await this._postJson('/api/auth/register', {
+      username, email: email || undefined, password, confirmPassword,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Registration failed');
     this.currentUser = data.user;
     return data.user;
   },
@@ -62,9 +67,7 @@ window.AccountAPI = {
         'iconCurrentSpider', 'iconCurrentBird', 'userMusicVol', 'userSfxVol',
         'menuMusicEnabled',
       ];
-      for (const key of keys) {
-        localStorage.removeItem(key);
-      }
+      for (const key of keys) localStorage.removeItem(key);
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const key = localStorage.key(i);
         if (key && (key.startsWith('bestPercent_') || key.startsWith('practiceBestPercent_'))) {
@@ -72,28 +75,7 @@ window.AccountAPI = {
         }
       }
     } catch {}
-
-    try {
-      sessionStorage.clear();
-    } catch {}
-
-    try {
-      const cookies = document.cookie ? document.cookie.split(';') : [];
-      for (const cookie of cookies) {
-        const eqIndex = cookie.indexOf('=');
-        const name = (eqIndex >= 0 ? cookie.slice(0, eqIndex) : cookie).trim();
-        if (!name) continue;
-        const expires = 'expires=Thu, 01 Jan 1970 00:00:00 GMT';
-        const path = 'path=/';
-        document.cookie = `${name}=; ${expires}; ${path}`;
-        document.cookie = `${name}=; ${expires}; ${path}; domain=${location.hostname}`;
-      }
-    } catch {}
-  },
-
-  async unlinkAccount() {
-    await this.logout();
-    this.clearClientData();
+    try { sessionStorage.clear(); } catch {}
   },
 
   async getCloudSave() {
@@ -112,49 +94,6 @@ window.AccountAPI = {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to save');
-  },
-
-  collectLocalData() {
-    const keys = [
-      'gd_settings', 'gd_totalAttempts', 'gd_totalJumps', 'gd_totalDeaths',
-      'gd_completedLevels', 'created_levels', 'iconMainColor', 'iconSecondaryColor',
-      'iconCurrentPlayer', 'iconCurrentShip', 'iconCurrentBall', 'iconCurrentWave',
-      'iconCurrentSpider', 'iconCurrentBird', 'userMusicVol', 'userSfxVol',
-      'menuMusicEnabled',
-    ];
-    const save = {};
-    for (const key of keys) {
-      const val = localStorage.getItem(key);
-      if (val !== null) save[key] = val;
-    }
-    const bestPercents = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && (k.startsWith('bestPercent_') || k.startsWith('practiceBestPercent_'))) {
-        bestPercents[k] = localStorage.getItem(k);
-      }
-    }
-    save._bestPercents = bestPercents;
-    return save;
-  },
-
-  applyLocalData(save) {
-    if (!save) return;
-    const keys = [
-      'gd_settings', 'gd_totalAttempts', 'gd_totalJumps', 'gd_totalDeaths',
-      'gd_completedLevels', 'created_levels', 'iconMainColor', 'iconSecondaryColor',
-      'iconCurrentPlayer', 'iconCurrentShip', 'iconCurrentBall', 'iconCurrentWave',
-      'iconCurrentSpider', 'iconCurrentBird', 'userMusicVol', 'userSfxVol',
-      'menuMusicEnabled',
-    ];
-    for (const key of keys) {
-      if (save[key] !== undefined) localStorage.setItem(key, save[key]);
-    }
-    if (save._bestPercents) {
-      for (const [k, v] of Object.entries(save._bestPercents)) {
-        localStorage.setItem(k, v);
-      }
-    }
   },
 };
 

@@ -57,6 +57,28 @@
 <script>function closeSavedPage() {
 	window.parent.postMessage({ type: 'WD_CLOSE_SEARCH', returnTo: 'creator' }, '*')
 }
+
+function fmtNum(n) {
+	n = parseInt(n) || 0
+	if (n >= 1000000) return (n/1000000).toFixed(1).replace(/\.0$/,"") + "M"
+	if (n >= 1000) return (n/1000).toFixed(1).replace(/\.0$/,"") + "K"
+	return n
+}
+function diffScale(x) {
+	if (x.mythic || x.legendary) return "transform:scale(1.5)"
+	if (x.epic) return "transform:scale(1.3)"
+	if (x.featured) return "transform:scale(1.1)"
+	return ""
+}
+function ratingInfo(x) {
+	const plat = !!x.platformer
+	return {
+		count: plat ? (x.moons || x.stars || 0) : (x.stars || 0),
+		img: plat ? "assets/moon.png" : "assets/star.png",
+		label: plat ? "moons" : "stars",
+		length: plat ? "Plat." : (x.length || "-")
+	}
+}
 function clean(text) { return (text || "").toString().replace(/&/g, "&#38;").replace(/</g, "&#60;").replace(/>/g, "&#62;").replace(/=/g, "&#61;").replace(/"/g, "&#34;").replace(/'/g, "&#39;") }
 
 let saved = []
@@ -110,15 +132,15 @@ if (saved.length === 0) {
 			</h2>
 			<h3 class="lessSpaced help pre blue" style="overflow: hidden; max-height: 19%; width: fit-content; padding: 1% 1% 0% 0%">${filteredSong}</h3>
 			<h3 class="lessSpaced" style="width: fit-content">
-				<img class="help valign rightSpace" title="Length" src="assets/time.png" height="14%">${x.length ?? "-"}
+				<img class="help valign rightSpace" title="Length" src="assets/time.png" height="14%">${ratingInfo(x).length}
 				<img class="help valign rightSpace" title="Downloads" src="assets/download.png" height="14%">${x.downloads ?? 0}
 				<img class="help valign rightSpace" title="Likes" src="assets/like.png" height="14%">${x.likes ?? 0}
-				${x.orbs ? `<img class="help valign rightSpace" title="Mana Orbs" src="assets/orbs.png" height="14%">${x.orbs}` : ""}
+				${x.orbs ? `<img class="help valign rightSpace" title="Mana Orbs" src="assets/orbs.png" height="14%">${fmtNum(x.orbs)}` : ""}
 			</h3>
 
 <div class="center" style="position:absolute; top: ${6.5 + (y * 33.5) + (!x.coins ? 2.5 : 0)}%; left: 4.4%; transform:scale(0.82); height: 10%; width: 12.5%;">
 	<img class="help spaced" title="${x.difficulty || ""}" src="${diffSrc}" height="150%" style="margin-bottom: 0%; position: relative; z-index: 1; ${x.difficultyFace && x.difficultyFace.includes('mythic') ? 'transform:scale(1.45);' : x.difficultyFace && x.difficultyFace.includes('legendary') ? 'transform:scale(1.45);' : x.difficultyFace && x.difficultyFace.includes('epic') ? 'transform:scale(1.25);' : x.difficultyFace && x.difficultyFace.includes('featured') ? 'transform:scale(1.1);' : ''}">
-	<h3 style="margin-top:0.8vh; position: relative; z-index: 2;">
+	<h3 style="margin-top:0.8vh; position: relative; z-index: 2; font-size:3.8vh">
 		${(x.difficulty || "").includes('Demon') ? "Demon" : (x.difficulty || "")}
 	</h3>
 	${x.stars > 0 ? `<h3 class="help" title="${x.stars} star${x.stars == 1 ? "" : "s"}" style="position: relative; z-index: 2;">${x.stars}<img class="valign sideSpaceB" src="assets/star.png" height="35%" style="transform:translateY(-8%)"></h3>` : ""}

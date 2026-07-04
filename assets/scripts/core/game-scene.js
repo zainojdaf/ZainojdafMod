@@ -235,6 +235,20 @@ class GameScene extends Phaser.Scene {
       }, () => this._menuActive);
       return icon;
     });
+    this._profileBtn = this.add.image(0, 0, "GJ_GameSheet03", "GJ_profileButton_001.png").setScrollFactor(0).setDepth(30).setScale(0.9).setInteractive();
+    this._expandHitArea(this._profileBtn, 1.2);
+    this._makeBouncyButton(this._profileBtn, 0.9, () => {
+      // Profile screen not implemented yet — placeholder button only.
+    }, () => this._menuActive);
+    this._profileNameText = this.add.bitmapText(0, 0, "bigFont", (window.AccountAPI && window.AccountAPI.currentUser) ? window.AccountAPI.currentUser.username : "Guest", 34)
+      .setScrollFactor(0).setDepth(30).setOrigin(0, 0.5);
+    if (window.AccountAPI) {
+      window.AccountAPI.checkSession().then(() => {
+        if (this._profileNameText && this._profileNameText.active) {
+          this._profileNameText.setText(window.AccountAPI.currentUser ? window.AccountAPI.currentUser.username : "Guest");
+        }
+      }).catch(() => {});
+    }
     const _0x28fa5b = this.scale.isFullscreen;
 this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFullscreenOff_001.png" : "toggleFullscreenOn_001.png").setScrollFactor(0).setDepth(30).setScale(0.64).setAlpha(0.8).setTint(Phaser.Display.Color.GetColor(255, 255, 255)).setInteractive();
     this._expandHitArea(this._menuFsBtn, 1.5);
@@ -244,17 +258,17 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       this._expandHitArea(this._menuFsBtn, 1.5);
       this._toggleFullscreen();
     }, () => this._menuActive);
-    this._menuSettingsBtn = this.add.image(centerX + 37, screenHeight - 90, "GJ_GameSheet03", "GJ_optionsBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
+    this._menuSettingsBtn = this.add.image(centerX + 92, screenHeight - 90, "GJ_GameSheet03", "GJ_optionsBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
     this._expandHitArea(this._menuSettingsBtn, 1);
     this._makeBouncyButton(this._menuSettingsBtn, 1, () => {
       this._showSettingsScreen();
     }, () => this._menuActive && !this._settingsPopup);
-    this._menuStatsBtn = this.add.image(centerX + 147, screenHeight - 90, "GJ_GameSheet03", "GJ_statsBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
+    this._menuStatsBtn = this.add.image(centerX + 202, screenHeight - 90, "GJ_GameSheet03", "GJ_statsBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
     this._expandHitArea(this._menuStatsBtn, 1);
     this._makeBouncyButton(this._menuStatsBtn, 1, () => {
       this._showStatsScreen();
     }, () => this._menuActive);
-    this._menuAchievementsBtn = this.add.image(centerX - 73, screenHeight - 90, "GJ_GameSheet03", "GJ_achBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive();
+    this._menuAchievementsBtn = this.add.image(centerX - 18, screenHeight - 90, "GJ_GameSheet03", "GJ_achBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive();
     this._expandHitArea(this._menuAchievementsBtn, 1);
     this._makeBouncyButton(this._menuAchievementsBtn, 1, () => {
     }, () => this._menuActive);
@@ -262,12 +276,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     this._expandHitArea(this._menuDailyChestBtn, 1);
     this._makeBouncyButton(this._menuDailyChestBtn, 1, () => {
     }, () => this._menuActive);
-    this._menuGeodeCircleBtn = this.add.image(centerX + 367, screenHeight - 90, "GJ_GeodeSheet", "geode-circle.png").setScrollFactor(0).setDepth(30).setInteractive().setScale(0.42);
-    this._expandHitArea(this._menuGeodeCircleBtn, 1);
-    this._makeBouncyButton(this._menuGeodeCircleBtn, 0.42, () => {
-    this._showGeodeCircleScreen();
-    }, () => this._menuActive && !this._geodecirclePopup);
-    this._menuNewgroundsBtn = this.add.image(centerX + 257, screenHeight - 90, "GJ_GameSheet03", "GJ_ngBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
+    this._menuNewgroundsBtn = this.add.image(centerX + 312, screenHeight - 90, "GJ_GameSheet03", "GJ_ngBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
     this._expandHitArea(this._menuNewgroundsBtn, 1);
     this._makeBouncyButton(this._menuNewgroundsBtn, 1, () => {
       this._buildNewgroundsPopup();
@@ -2675,12 +2684,6 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         }
         return;
       }
-            if (this._geodecircleLayerOverlay) {
-        if (!this._geodecircleScreenClosing) {
-          this._hideGeodeCircleScreen();
-        }
-        return;
-      }
       if (this._infoPopup) {
         this._infoPopup.destroy();
         this._infoPopup = null;
@@ -4549,11 +4552,14 @@ _buildSettingsPopup() {
     if (this._menuAchievementsBtn) {
       this._menuAchievementsBtn.setVisible(false);
     }
+   if (this._menuMoreGamesBtn) {
+     this._menuMoreGamesBtn.setVisible(false);
+    }
+   if (this._menuDailyChestBtn) {
+    this._menuDailyChestBtn.setVisible(false);
+    }
     if (this._menuStatsBtn) {
       this._menuStatsBtn.setVisible(false);
-    }
-    if (this._menuGeodeCircleBtn) {
-      this._menuGeodeCircleBtn.setVisible(false);
     }
     if (this._playBtn) {
       this.tweens.killTweensOf(this._playBtn);
@@ -4709,6 +4715,12 @@ _buildSettingsPopup() {
         });
       }
       this._socialIcons = [];
+    }
+    if (this._profileBtn) {
+      this.tweens.add({ targets: this._profileBtn, y: screenHeight + 64, duration: 300, ease: "Quad.In", onComplete: () => { this._profileBtn.destroy(); this._profileBtn = null; } });
+    }
+    if (this._profileNameText) {
+      this.tweens.add({ targets: this._profileNameText, y: screenHeight + 64, duration: 300, ease: "Quad.In", onComplete: () => { this._profileNameText.destroy(); this._profileNameText = null; } });
     }
     if (this._logo) {
       this.tweens.add({
@@ -4881,6 +4893,14 @@ _buildSettingsPopup() {
     if (this._robLogo) {
       this._robLogo.x = 110;
       this._robLogo.y = 585;
+    }
+    if (this._profileBtn) {
+      this._profileBtn.x = 65;
+      this._profileBtn.y = 440;
+    }
+    if (this._profileNameText) {
+      this._profileNameText.x = 65 + (this._profileBtn ? (this._profileBtn.displayWidth / 2) + 10 : 40);
+      this._profileNameText.y = 440;
     }
     if (this._socialIcons && this._socialIcons.length > 0) {
       const _iconSpacing = 52;
@@ -7497,7 +7517,7 @@ _applyMirrorEffect() {
         return grp;
     };
 
-    _makeSettingsBtn(_sColL, _sRow1Y, "Account",    _sBtnW2, true, () => { this._buildAccountPopup(); });
+    _makeSettingsBtn(_sColL, _sRow1Y, "Account",    _sBtnW2, true, () => { window.WDAccountUI && window.WDAccountUI.open(); });
     _makeSettingsBtn(_sColR, _sRow1Y, "How To Play", _sBtnW2, true, () => { this._buildHowToPlayPopup(); });
     _makeSettingsBtn(_sColL, _sRow2Y, "Options",    _sBtnW2, true,  () => { this._buildSettingsPopup(); });
     _makeSettingsBtn(_sColR, _sRow2Y, "Graphics",   _sBtnW2, true,  () => { this._buildGraphicsPopup(); });
