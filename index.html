@@ -7,6 +7,7 @@
 	<link rel="icon" type="image/x-icon" href="assets/favicon.ico">
 	<link rel="stylesheet" href="assets/style.css">
 	<link rel="stylesheet" href="gdbrowser/assets/css/browser.css">
+	<link rel="stylesheet" href="assets/scripts/ui/account-ui.css">
 	<meta property="og:title" content="Web Dash"/>
 	<meta property="og:description" content="A mod of geometrydash.com!"/>
 	<meta property="og:image" content="https://web-dashers.github.io/assets/logo.png"/>
@@ -28,7 +29,6 @@
 		#wd-results-view { display: none; }
 		#wd-search-view  { display: block; }
 
-		/* ── SEARCH BAR ROW ─────────────────────────────────────── */
 		.wd-searchBarWrap {
 			display: flex; align-items: center;
 			width: 115vh; margin: 1.5% auto 1% auto;
@@ -41,7 +41,6 @@
 		}
 		.wd-searchBarWrap img { height: 5.5vh; flex-shrink: 0; }
 
-		/* ── LENGTH BAR ─────────────────────────────────────────── */
 		#wd-lengthBar {
 			display: flex; align-items: center; justify-content: center;
 			width: 115vh; height: 7vh;
@@ -51,7 +50,6 @@
 		}
 		#wd-lengthBar .lengthDiv { display:inline-flex; align-items:center; justify-content:center; }
 
-		/* ── ADVANCED FILTER BUTTONS (real GD longBtn style) ────── */
 		.wd-filterBtn {
 			display: inline-flex; align-items: center; justify-content: center;
 			position: relative; cursor: pointer;
@@ -73,7 +71,6 @@
 		}
 		.wd-filterBtn.active-filter .wd-btnBg { filter: brightness(1.25) saturate(1.3); }
 
-		/* Real GD checkbox style */
 		.wd-gdcheck {
 			display: inline-block; width: 5vh; height: 5vh;
 			background-size: contain; background-repeat: no-repeat; background-position: center;
@@ -84,17 +81,13 @@
 			background-image: url('gdbrowser/assets/game-sprites/GJ_checkOn_001.png');
 		}
 
-		/* Advanced filter row layout */
 		.wd-advRow {
 			display: flex; align-items: center;
 			margin: 2% 4%; gap: 3%;
 		}
 		.wd-advRow h1 { margin: 0; font-size: 4vh; cursor: pointer; }
-
-		/* ── RESULTS ────────────────────────────────────────────── */
 		#wd-searchBox::-webkit-scrollbar { display: none; }
 
-		/* GD play button (old, im using other html's now) */
 		.wd-playBtn {
 			display: block;
 			width: 9vh; height: 9vh;
@@ -106,7 +99,6 @@
 		.wd-playBtn:hover  { transform: scale(1.1); }
 		.wd-playBtn:active { transform: scale(0.92); }
 
-		/* Popup overlay fix */
 		#wd-search-overlay .popup {
 			z-index: 10000 !important;
 			pointer-events: all !important;
@@ -123,6 +115,7 @@
 	<script src="assets/scripts/api/GDapiWrapper.js"></script>
 	<script src="assets/scripts/utils/api-config.js"></script>
 	<script src="assets/scripts/api/account-api.js"></script>
+	<script defer src="assets/scripts/ui/account-ui.js"></script>
 	<script>window._gdProxyUrl = "https://gd-proxy.gmdc.workers.dev";</script>
 	<script defer src="assets/scripts/utils/config.js"></script>
 	<script defer src="assets/scripts/core/triggers.js"></script>
