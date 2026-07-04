@@ -5,6 +5,6 @@ window._apiBase = (function () {
   const h = location.hostname;
   if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:3000';
 
-  const RENDER_URL = 'https://REPLACE-ME.onrender.com'; // <-- put your Render URL here
-  return RENDER_URL;
+  const RAILWAY_URL = 'backend-production-cff96.up.railway.app'; // <-- put your Render URL here
+  return RAILWAY_URL;
 }());
