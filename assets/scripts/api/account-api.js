@@ -95,6 +95,30 @@ window.AccountAPI = {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to save');
   },
+
+  // Snapshot every localStorage key/value (progress, icons, settings, etc.)
+  // and push it to the cloud save for the logged-in account.
+  async pushLocalSaveToCloud() {
+    const snapshot = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      snapshot[key] = localStorage.getItem(key);
+    }
+    await this.setCloudSave(snapshot);
+  },
+
+  // Pull the cloud save down and overwrite matching localStorage keys.
+  // Returns true if a save was found and applied, false if there was nothing saved yet.
+  async pullCloudSaveToLocal() {
+    const snapshot = await this.getCloudSave();
+    if (!snapshot) return false;
+    for (const key in snapshot) {
+      if (Object.prototype.hasOwnProperty.call(snapshot, key)) {
+        localStorage.setItem(key, snapshot[key]);
+      }
+    }
+    return true;
+  },
 };
 
 // Check session silently on page load so currentUser is populated before

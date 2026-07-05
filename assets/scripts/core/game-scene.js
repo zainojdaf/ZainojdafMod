@@ -241,7 +241,7 @@ class GameScene extends Phaser.Scene {
       // Profile screen not implemented yet — placeholder button only.
     }, () => this._menuActive);
     this._profileNameText = this.add.bitmapText(0, 0, "goldFont", (window.AccountAPI && window.AccountAPI.currentUser) ? window.AccountAPI.currentUser.username : "Guest", 34)
-      .setScrollFactor(0).setDepth(30).setOrigin(0.5, 0.5);
+      .setScrollFactor(0).setDepth(30).setOrigin(0.5, 1.0);
     if (window.AccountAPI) {
       window.AccountAPI.checkSession().then(() => {
         if (this._profileNameText && this._profileNameText.active) {
@@ -4128,12 +4128,7 @@ _buildSettingsPopup() {
     }
   }
 
-  // ---------------------------------------------------------------------
   // ACCOUNT / LOGIN / REGISTER POPUP
-  // Built entirely from the game's real GD sprites (GJ_square01 panel,
-  // GJ_button_01 pill buttons, GJ_closeBtn_001 close icon, bigFont/goldFont)
-  // so it matches the rest of the game instead of being an HTML overlay.
-  // ---------------------------------------------------------------------
   _makeAcctPanelBg(container, w, h) {
     const borderSize = this.textures.get("GJ_square01").source[0].width * 0.325;
     const bg = this._drawScale9(0, 0, w, h, "GJ_square01", borderSize, 0xffffff, 1);
@@ -4154,11 +4149,6 @@ _buildSettingsPopup() {
     return btnContainer;
   }
 
-  // Custom in-canvas text field (NOT a real <input>) so typing never reaches
-  // the page's DOM focus. We still must disable this.input.keyboard while
-  // the popup is open (done in _buildAccountPopup/_closeAccountPopup) so
-  // Phaser's own bound keys (W, Z, L, Space, etc.) don't fire from the same
-  // keystrokes at the same time.
   _makeAcctTextField(container, x, y, w, fieldState, opts) {
     opts = opts || {};
     const h = 56;
@@ -4221,7 +4211,7 @@ _buildSettingsPopup() {
     root.add(panel);
     this._makeAcctPanelBg(panel, panelW, panelH);
 
-    const closeBtn = this.add.image(-panelW / 2, -panelH / 2, "GJ_WebSheet", "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
+    const closeBtn = this.add.image(-panelW / 2 - 0, -panelH / 2 + 6, "GJ_WebSheet", "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
     this._expandHitArea(closeBtn, 2);
     this._makeBouncyButton(closeBtn, 0.8, () => this._closeAccountPopup());
     panel.add(closeBtn);
@@ -4236,14 +4226,33 @@ _buildSettingsPopup() {
     if (loggedIn) {
       const nameTxt = this.add.bitmapText(0, -60, "goldFont", window.AccountAPI.currentUser.username, 40).setOrigin(0.5, 0.5);
       homeView.add(nameTxt);
-      this._makeAcctButton(homeView, 0, 60, 400, 68, "Log Out", RED, () => this._doAccountLogout());
+
+      const statusTxt = this.add.bitmapText(0, 165, "bigFont", "", 20).setOrigin(0.5, 0.5).setTint(0x9fffb0);
+      homeView.add(statusTxt);
+      this._acctSyncStatusTxt = statusTxt;
+
+      const saveBtn = this.add.image(-95, 20, "gold-save").setScale(0.55).setInteractive();
+      homeView.add(saveBtn);
+      this._makeBouncyButton(saveBtn, 0.55, () => this._doCloudSave());
+
+      const loadBtn = this.add.image(95, 20, "gold-load").setScale(0.55).setInteractive();
+      homeView.add(loadBtn);
+      this._makeBouncyButton(loadBtn, 0.55, () => this._doCloudLoad());
+
+      const logoutBtn = this.add.image(0, 100, "gold-logout").setScale(0.6).setInteractive();
+      homeView.add(logoutBtn);
+      this._makeBouncyButton(logoutBtn, 0.6, () => this._doAccountLogout());
     } else {
       const line1 = this.add.bitmapText(0, -110, "goldFont", "Not logged in", 28).setOrigin(0.5, 0.5);
       const line2 = this.add.bitmapText(0, -75, "bigFont", "Create an account to back up", 22).setOrigin(0.5, 0.5);
       const line3 = this.add.bitmapText(0, -48, "bigFont", "and load your data from the cloud", 22).setOrigin(0.5, 0.5);
       homeView.add([line1, line2, line3]);
-      this._makeAcctButton(homeView, 0, 20, 460, 68, "Log In", GREEN, () => this._showAccountView("login"));
-      this._makeAcctButton(homeView, 0, 105, 460, 68, "Register", RED, () => this._showAccountView("register"));
+      const loginBtn = this.add.image(0, 32, "gold-login").setScale(0.6).setInteractive();
+      homeView.add(loginBtn);
+      this._makeBouncyButton(loginBtn, 0.6, () => this._showAccountView("login"));
+      const registerBtn = this.add.image(0, 105, "gold-register").setScale(0.6).setInteractive();
+      homeView.add(registerBtn);
+      this._makeBouncyButton(registerBtn, 0.6, () => this._showAccountView("register"));
     }
 
     // ---------------- LOGIN VIEW ----------------
@@ -4258,18 +4267,23 @@ _buildSettingsPopup() {
     const loginErrorTxt = this.add.bitmapText(0, -150, "bigFont", "", 22).setOrigin(0.5, 0.5).setTint(0xff3b3b);
     loginView.add(loginErrorTxt);
 
-    const loginUserLabel = this.add.bitmapText(fieldLeftX, -110, "bigFont", "Username:", 24).setOrigin(0, 0.5);
+    const loginUserLabel = this.add.bitmapText(fieldLeftX, -110, "bigFont", "Username:", 24).setOrigin(0, 0.8);
     loginView.add(loginUserLabel);
     const loginUserState = { value: "" };
     const loginUserField = this._makeAcctTextField(loginView, 0, -75, fieldW, loginUserState, {});
 
-    const loginPassLabel = this.add.bitmapText(fieldLeftX, -30, "bigFont", "Password:", 24).setOrigin(0, 0.5);
+    const loginPassLabel = this.add.bitmapText(fieldLeftX, -30, "bigFont", "Password:", 24).setOrigin(0, 0.8);
     loginView.add(loginPassLabel);
     const loginPassState = { value: "" };
     const loginPassField = this._makeAcctTextField(loginView, 0, 5, fieldW, loginPassState, { password: true });
 
-    this._makeAcctButton(loginView, -125, 100, 220, 68, "Cancel", RED, () => this._showAccountView("home"));
-    this._makeAcctButton(loginView, 125, 100, 220, 68, "Login", GREEN, () => this._doAccountLogin());
+    const loginCancelBtn = this.add.image(-150, 100, "gold-cancel").setScale(0.6).setInteractive();
+    loginView.add(loginCancelBtn);
+    this._makeBouncyButton(loginCancelBtn, 0.6, () => this._showAccountView("home"));
+    
+    const loginBtn = this.add.image(125, 100, "gold-login2").setScale(0.6).setInteractive();
+    loginView.add(loginBtn);
+    this._makeBouncyButton(loginBtn, 0.6, () => this._doAccountLogin());
 
     // ---------------- REGISTER VIEW ----------------
     const registerView = this.add.container(0, 0).setVisible(false);
@@ -4280,30 +4294,35 @@ _buildSettingsPopup() {
     const regErrorTxt = this.add.bitmapText(0, -218, "bigFont", "", 20).setOrigin(0.5, 0.5).setTint(0xff3b3b);
     registerView.add(regErrorTxt);
 
-    const regUserLabel = this.add.bitmapText(fieldLeftX, -195, "bigFont", "Username:", 22).setOrigin(0, 0.5);
-    const regUserNote = this.add.bitmapText(fieldLeftX + regUserLabel.width + 8, -195, "bigFont", "(shown to other players)", 15).setOrigin(0, 0.5).setTint(0xd8d8d8);
+    const regUserLabel = this.add.bitmapText(fieldLeftX, -195, "bigFont", "Username:", 22).setOrigin(0, 0.8);
+    const regUserNote = this.add.bitmapText(fieldLeftX + regUserLabel.width + 8, -195, "bigFont", "(shown to other players)", 15).setOrigin(0, 0.8).setTint(0xd8d8d8);
     registerView.add([regUserLabel, regUserNote]);
     const regUserState = { value: "" };
     this._makeAcctTextField(registerView, 0, -163, fieldW, regUserState, {});
 
-    const regPassLabel = this.add.bitmapText(fieldLeftX, -122, "bigFont", "Password:", 22).setOrigin(0, 0.5);
+    const regPassLabel = this.add.bitmapText(fieldLeftX, -122, "bigFont", "Password:", 22).setOrigin(0, 0.8);
     registerView.add(regPassLabel);
     const regPassState = { value: "" };
     this._makeAcctTextField(registerView, 0, -90, fieldW, regPassState, { password: true });
 
-    const regPass2Label = this.add.bitmapText(fieldLeftX, -49, "bigFont", "Confirm Password:", 22).setOrigin(0, 0.5);
+    const regPass2Label = this.add.bitmapText(fieldLeftX, -49, "bigFont", "Confirm Password:", 22).setOrigin(0, 0.8);
     registerView.add(regPass2Label);
     const regPass2State = { value: "" };
     this._makeAcctTextField(registerView, 0, -17, fieldW, regPass2State, { password: true });
 
-    const regEmailLabel = this.add.bitmapText(fieldLeftX, 24, "bigFont", "Email:", 22).setOrigin(0, 0.5);
-    const regEmailNote = this.add.bitmapText(fieldLeftX + regEmailLabel.width + 8, 24, "bigFont", "(optional)", 15).setOrigin(0, 0.5).setTint(0xd8d8d8);
+    const regEmailLabel = this.add.bitmapText(fieldLeftX, 24, "bigFont", "Email:", 22).setOrigin(0, 0.8);
+    const regEmailNote = this.add.bitmapText(fieldLeftX + regEmailLabel.width + 8, 24, "bigFont", "(optional)", 15).setOrigin(0, 0.8).setTint(0xd8d8d8);
     registerView.add([regEmailLabel, regEmailNote]);
     const regEmailState = { value: "" };
     this._makeAcctTextField(registerView, 0, 56, fieldW, regEmailState, {});
 
-    this._makeAcctButton(registerView, -125, panelH / 2 - 55, 220, 68, "Cancel", RED, () => this._showAccountView("home"));
-    this._makeAcctButton(registerView, 125, panelH / 2 - 55, 220, 68, "Submit", GREEN, () => this._doAccountRegister());
+    const regCancelBtn = this.add.image(-150, panelH / 2 - 85, "gold-cancel").setScale(0.6).setInteractive();
+    registerView.add(regCancelBtn);
+    this._makeBouncyButton(regCancelBtn, 0.6, () => this._showAccountView("home"));
+    
+    const regSubmitBtn = this.add.image(125, panelH / 2 - 85, "gold-submit").setScale(0.6).setInteractive();
+    registerView.add(regSubmitBtn);
+    this._makeBouncyButton(regSubmitBtn, 0.6, () => this._doAccountRegister());
 
     this._acctViews = { home: homeView, login: loginView, register: registerView };
     this._acctFieldStates = [loginUserState, loginPassState, regUserState, regPassState, regPass2State, regEmailState];
@@ -4424,6 +4443,33 @@ _buildSettingsPopup() {
     this._refreshAccountPopup();
   }
 
+  async _doCloudSave() {
+    if (!this._acctSyncStatusTxt) return;
+    this._acctSyncStatusTxt.setText("Saving...").setTint(0x9fffb0);
+    try {
+      await window.AccountAPI.pushLocalSaveToCloud();
+      if (this._acctSyncStatusTxt) this._acctSyncStatusTxt.setText("Saved!").setTint(0x9fffb0);
+    } catch (err) {
+      if (this._acctSyncStatusTxt) this._acctSyncStatusTxt.setText(err.message || "Save failed").setTint(0xff3b3b);
+    }
+  }
+
+  async _doCloudLoad() {
+    if (!this._acctSyncStatusTxt) return;
+    this._acctSyncStatusTxt.setText("Loading...").setTint(0x9fffb0);
+    try {
+      const found = await window.AccountAPI.pullCloudSaveToLocal();
+      if (!found) {
+        if (this._acctSyncStatusTxt) this._acctSyncStatusTxt.setText("No cloud save found").setTint(0xffdd66);
+        return;
+      }
+      if (this._acctSyncStatusTxt) this._acctSyncStatusTxt.setText("Loaded! Reloading...").setTint(0x9fffb0);
+      setTimeout(() => location.reload(), 600);
+    } catch (err) {
+      if (this._acctSyncStatusTxt) this._acctSyncStatusTxt.setText(err.message || "Load failed").setTint(0xff3b3b);
+    }
+  }
+
   _closeAccountPopup(keepKeyboardDisabled) {
     if (this._acctCursorInterval) {
       clearInterval(this._acctCursorInterval);
@@ -4441,6 +4487,7 @@ _buildSettingsPopup() {
     this._acctFieldStates = null;
     this._acctErrorTxts = null;
     this._acctActiveField = null;
+    this._acctSyncStatusTxt = null;
     if (!keepKeyboardDisabled) {
       try { this.input.keyboard.enableGlobalCapture(); } catch (e) {}
       try { this.input.keyboard.enabled = true; } catch (e) {}
