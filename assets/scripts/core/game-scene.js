@@ -241,7 +241,7 @@ class GameScene extends Phaser.Scene {
       // Profile screen not implemented yet — placeholder button only.
     }, () => this._menuActive);
     this._profileNameText = this.add.bitmapText(0, 0, "goldFont", (window.AccountAPI && window.AccountAPI.currentUser) ? window.AccountAPI.currentUser.username : "Guest", 34)
-      .setScrollFactor(0).setDepth(30).setOrigin(0.5, 1.0);
+      .setScrollFactor(0).setDepth(30).setOrigin(0.5, 1.2);
     if (window.AccountAPI) {
       window.AccountAPI.checkSession().then(() => {
         if (this._profileNameText && this._profileNameText.active) {
