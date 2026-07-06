@@ -5274,11 +5274,11 @@ _makeAcctPanelBg(container, w, h) {
       this._robLogo.y = 585;
     }
     if (this._profileBtn) {
-      this._profileBtn.x = 65;
+      this._profileBtn.x = 85;
       this._profileBtn.y = 440;
     }
     if (this._profileNameText) {
-      this._profileNameText.x = 65;
+      this._profileNameText.x = 85;
       this._profileNameText.y = 440 - 38;
     }
     if (this._socialIcons && this._socialIcons.length > 0) {
