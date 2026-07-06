@@ -4139,7 +4139,7 @@ _buildSettingsPopup() {
       w - borderSize * 2,
       h - borderSize * 2,
       0x000000,
-      0.4
+      0.7
     );
     container.add(inner);
 
