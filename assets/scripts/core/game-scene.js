@@ -236,12 +236,12 @@ class GameScene extends Phaser.Scene {
       return icon;
     });
     this._profileBtn = this.add.image(0, 0, "GJ_GameSheet03", "GJ_profileButton_001.png").setScrollFactor(0).setDepth(30).setScale(0.9).setInteractive();
-    this._expandHitArea(this._profileBtn, 1.2);
+    this._expandHitArea(this._profileBtn, 0.9);
     this._makeBouncyButton(this._profileBtn, 0.9, () => {
       // Profile screen not implemented yet — placeholder button only.
     }, () => this._menuActive);
     this._profileNameText = this.add.bitmapText(0, 0, "goldFont", (window.AccountAPI && window.AccountAPI.currentUser) ? window.AccountAPI.currentUser.username : "Guest", 34)
-      .setScrollFactor(0).setDepth(30).setOrigin(0.5, 1.2);
+      .setScrollFactor(0).setDepth(30).setOrigin(0.5, 0.9);
     if (window.AccountAPI) {
       window.AccountAPI.checkSession().then(() => {
         if (this._profileNameText && this._profileNameText.active) {
