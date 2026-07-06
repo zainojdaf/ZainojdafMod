@@ -4132,7 +4132,7 @@ _buildSettingsPopup() {
 _makeAcctPanelBg(container, w, h) {
     const borderSize = this.textures.get("epicbox").source[0].width * 0.325;
 
-    const pad = 70; // bigger inset so it doesn't peek past the border
+    const pad = 80; // bigger inset so it doesn't peek past the border
     const inner = this.add.rectangle(
       0,
       0,
@@ -4232,7 +4232,7 @@ _makeAcctPanelBg(container, w, h) {
     // ---------------- HOME VIEW ----------------
     const homeView = this.add.container(0, 0);
     panel.add(homeView);
-    const homeTitle = this.add.bitmapText(0, -panelH / 2 + 55, "bigFont", "Account", 46).setOrigin(0.75, 0.5);
+    const homeTitle = this.add.bitmapText(0, -panelH / 2 + 55, "bigFont", "Account", 46).setOrigin(0.5, 0.75);
     homeView.add(homeTitle);
 
     const loggedIn = !!(window.AccountAPI && window.AccountAPI.currentUser);
@@ -4260,10 +4260,10 @@ _makeAcctPanelBg(container, w, h) {
       const line2 = this.add.bitmapText(0, -75, "bigFont", "Create an account to back up", 22).setOrigin(0.5, 0.5);
       const line3 = this.add.bitmapText(0, -48, "bigFont", "and load your data from the cloud", 22).setOrigin(0.5, 0.5);
       homeView.add([line1, line2, line3]);
-      const loginBtn = this.add.image(0, 32, "gold-login").setScale(0.6).setInteractive();
+      const loginBtn = this.add.image(0, 42, "gold-login").setScale(0.6).setInteractive();
       homeView.add(loginBtn);
       this._makeBouncyButton(loginBtn, 0.6, () => this._showAccountView("login"));
-      const registerBtn = this.add.image(0, 105, "gold-register").setScale(0.6).setInteractive();
+      const registerBtn = this.add.image(0, 125, "gold-register").setScale(0.6).setInteractive();
       homeView.add(registerBtn);
       this._makeBouncyButton(registerBtn, 0.6, () => this._showAccountView("register"));
     }
@@ -4271,7 +4271,7 @@ _makeAcctPanelBg(container, w, h) {
     // ---------------- LOGIN VIEW ----------------
     const loginView = this.add.container(0, 0).setVisible(false);
     panel.add(loginView);
-    const loginTitle = this.add.bitmapText(0, -panelH / 2 + 55, "bigFont", "Login", 46).setOrigin(0.5, 0.5);
+    const loginTitle = this.add.bitmapText(0, -panelH / 2 + 55, "bigFont", "Login", 46).setOrigin(0.5, 0.75);
     loginView.add(loginTitle);
 
     const fieldLeftX = -panelW / 2 + 55;
@@ -4329,11 +4329,11 @@ _makeAcctPanelBg(container, w, h) {
     const regEmailState = { value: "" };
     this._makeAcctTextField(registerView, 0, 56, fieldW, regEmailState, {});
 
-    const regCancelBtn = this.add.image(-150, panelH / 2 - 85, "gold-cancel").setScale(0.6).setInteractive();
+    const regCancelBtn = this.add.image(-150, panelH / 2 - 55, "gold-cancel").setScale(0.6).setInteractive();
     registerView.add(regCancelBtn);
     this._makeBouncyButton(regCancelBtn, 0.6, () => this._showAccountView("home"));
     
-    const regSubmitBtn = this.add.image(125, panelH / 2 - 85, "gold-submit").setScale(0.6).setInteractive();
+    const regSubmitBtn = this.add.image(125, panelH / 2 - 55, "gold-submit").setScale(0.6).setInteractive();
     registerView.add(regSubmitBtn);
     this._makeBouncyButton(regSubmitBtn, 0.6, () => this._doAccountRegister());
 
