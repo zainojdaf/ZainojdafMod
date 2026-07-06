@@ -4132,14 +4132,14 @@ _buildSettingsPopup() {
  _makeAcctPanelBg(container, w, h) {
     const borderSize = this.textures.get("epicbox").source[0].width * 0.325;
 
-    // dark interior — drawn FIRST so the border renders on top of it
+    const pad = 20;
     const inner = this.add.rectangle(
       0,
       0,
-      w - borderSize * 2,
-      h - borderSize * 2,
+      w - pad,
+      h - pad,
       0x000000,
-      0.7
+      0.6
     );
     container.add(inner);
 
@@ -4148,7 +4148,6 @@ _buildSettingsPopup() {
 
     return bg;
 }
-
   _makeAcctButton(container, x, y, w, h, label, tint, onClick) {
     const btnContainer = this.add.container(x, y);
     const borderSize = this.textures.get("GJ_button01").source[0].width * 0.3;
