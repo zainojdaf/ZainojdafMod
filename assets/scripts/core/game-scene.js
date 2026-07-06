@@ -4135,7 +4135,7 @@ _buildSettingsPopup() {
     container.add(bg);
     return bg;
     
-    const overlay = this.add.rectangle(0, 0, w, h, 0x000000, 0.35).setOrigin(0, 0);
+    const overlay = this.add.rectangle(0, 0, w, h, 0x000000, 0.7).setOrigin(0, 0);
     container.add(overlay);
 
     return bg;
