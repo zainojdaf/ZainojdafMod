@@ -4329,11 +4329,11 @@ _makeAcctPanelBg(container, w, h) {
     const regEmailState = { value: "" };
     this._makeAcctTextField(registerView, 0, 56, fieldW, regEmailState, {});
 
-    const regCancelBtn = this.add.image(-150, panelH / 2 - 55, "gold-cancel").setScale(0.6).setInteractive();
+    const regCancelBtn = this.add.image(-150, panelH / 2 - 115, "gold-cancel").setScale(0.6).setInteractive();
     registerView.add(regCancelBtn);
     this._makeBouncyButton(regCancelBtn, 0.6, () => this._showAccountView("home"));
     
-    const regSubmitBtn = this.add.image(125, panelH / 2 - 55, "gold-submit").setScale(0.6).setInteractive();
+    const regSubmitBtn = this.add.image(125, panelH / 2 - 115, "gold-submit").setScale(0.6).setInteractive();
     registerView.add(regSubmitBtn);
     this._makeBouncyButton(regSubmitBtn, 0.6, () => this._doAccountRegister());
 
