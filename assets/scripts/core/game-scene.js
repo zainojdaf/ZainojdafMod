@@ -4134,16 +4134,6 @@ _buildSettingsPopup() {
     const bg = this._drawScale9(0, 0, w, h, "epicbox", borderSize, 0xffffff, 1);
     container.add(bg);
     
-    const inner = this.add.rectangle(
-        borderSize,
-        borderSize,
-        w - borderSize * 2,
-        h - borderSize * 2,
-        0x000000,
-        0.40
-    ).setOrigin(0, 0);
-    container.add(inner);
-
     return bg;
 }
 
