@@ -4132,7 +4132,7 @@ _buildSettingsPopup() {
 _makeAcctPanelBg(container, w, h) {
     const borderSize = this.textures.get("epicbox").source[0].width * 0.325;
 
-    const pad = 50; // bigger inset so it doesn't peek past the border
+    const pad = 70; // bigger inset so it doesn't peek past the border
     const inner = this.add.rectangle(
       0,
       0,
@@ -4165,7 +4165,8 @@ _makeAcctPanelBg(container, w, h) {
     opts = opts || {};
     const h = 56;
     const box = this.add.graphics();
-    box.fillStyle(0x000000, 0.35).fillRoundedRect(x - w / 2, y - h / 2, w, h, 12);
+    box.fillStyle(0x4a4a4a, 0.9).fillRoundedRect(x - w / 2, y - h / 2, w, h, 12);
+    box.lineStyle(2, 0x2b2b2b, 1).strokeRoundedRect(x - w / 2, y - h / 2, w, h, 12);
     container.add(box);
 
     const displayText = this.add.bitmapText(x - w / 2 + 16, y, "bigFont", "", 28).setOrigin(0, 0.5);
@@ -4231,7 +4232,7 @@ _makeAcctPanelBg(container, w, h) {
     // ---------------- HOME VIEW ----------------
     const homeView = this.add.container(0, 0);
     panel.add(homeView);
-    const homeTitle = this.add.bitmapText(0, -panelH / 2 + 55, "bigFont", "Account", 46).setOrigin(0.5, 0.5);
+    const homeTitle = this.add.bitmapText(0, -panelH / 2 + 55, "bigFont", "Account", 46).setOrigin(0.75, 0.5);
     homeView.add(homeTitle);
 
     const loggedIn = !!(window.AccountAPI && window.AccountAPI.currentUser);
