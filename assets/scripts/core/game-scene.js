@@ -4134,6 +4134,11 @@ _buildSettingsPopup() {
     const bg = this._drawScale9(0, 0, w, h, "epicbox", borderSize, 0xffffff, 1);
     container.add(bg);
     return bg;
+    
+    const overlay = this.add.rectangle(0, 0, w, h, 0x000000, 0.35).setOrigin(0, 0);
+    container.add(overlay);
+
+    return bg;
   }
 
   _makeAcctButton(container, x, y, w, h, label, tint, onClick) {
