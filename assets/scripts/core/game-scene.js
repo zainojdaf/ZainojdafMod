@@ -4129,15 +4129,15 @@ _buildSettingsPopup() {
   }
 
   // ACCOUNT / LOGIN / REGISTER POPUP
- _makeAcctPanelBg(container, w, h) {
+_makeAcctPanelBg(container, w, h) {
     const borderSize = this.textures.get("epicbox").source[0].width * 0.325;
 
-    const pad = 20;
+    const pad = 50; // bigger inset so it doesn't peek past the border
     const inner = this.add.rectangle(
       0,
       0,
-      w - pad,
-      h - pad,
+      Math.max(0, w - pad),
+      Math.max(0, h - pad),
       0x000000,
       0.6
     );
