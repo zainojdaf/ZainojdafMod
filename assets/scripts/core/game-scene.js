@@ -4129,11 +4129,23 @@ _buildSettingsPopup() {
   }
 
   // ACCOUNT / LOGIN / REGISTER POPUP
-  _makeAcctPanelBg(container, w, h) {
+ _makeAcctPanelBg(container, w, h) {
     const borderSize = this.textures.get("epicbox").source[0].width * 0.325;
+
+    // dark interior — drawn FIRST so the border renders on top of it
+    const inner = this.add.rectangle(
+      0,
+      0,
+      w - borderSize * 2,
+      h - borderSize * 2,
+      0x000000,
+      0.4
+    );
+    container.add(inner);
+
     const bg = this._drawScale9(0, 0, w, h, "epicbox", borderSize, 0xffffff, 1);
     container.add(bg);
-    
+
     return bg;
 }
 
