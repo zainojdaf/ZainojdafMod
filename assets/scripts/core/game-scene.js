@@ -4135,11 +4135,18 @@ _buildSettingsPopup() {
     container.add(bg);
     return bg;
     
-    const overlay = this.add.rectangle(0, 0, w, h, 0x000000, 0.7).setOrigin(0, 0);
-    container.add(overlay);
+    const inner = this.add.rectangle(
+        borderSize,
+        borderSize,
+        w - borderSize * 2,
+        h - borderSize * 2,
+        0x000000,
+        0.40
+    ).setOrigin(0, 0);
+    container.add(inner);
 
     return bg;
-  }
+}
 
   _makeAcctButton(container, x, y, w, h, label, tint, onClick) {
     const btnContainer = this.add.container(x, y);
