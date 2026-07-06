@@ -24,7 +24,6 @@ $('.dragscroll').each(function(_, el) {
       el.style['-webkit-user-select'] = 'none';
       previouslyMouseDown = true;
     }
-    //el.scrollLeft -= e.movementX;
     el.scrollTop -= e.movementY;
   }, {passive: true});
 });
