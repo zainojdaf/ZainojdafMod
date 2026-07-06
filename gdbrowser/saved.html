@@ -84,8 +84,6 @@ function clean(text) { return (text || "").toString().replace(/&/g, "&#38;").rep
 let saved = []
 try { saved = JSON.parse(localStorage.getItem('wdSavedLevels') || '[]') } catch(e) {}
 
-// older saved entries (saved before the full row data was stored) only have
-// id/name/author/difficultyFace/stars/difficulty - backfill the rest from the api
 async function backfillSaved() {
 	let changed = false
 	for (let i = 0; i < saved.length; i++) {
@@ -117,7 +115,6 @@ if (saved.length === 0) {
 		let filteredSong = clean((x.songName || "").replace(/[^ -~]/g, ""))
 		if (!filteredSong) filteredSong = clean(x.songName || "Unknown")
 
-		// view button - opens the level info page, no thumbnail image (matches real gdbrowser row, just no preview pic)
 		let viewBtn = `<a title="View level"><img style="margin-bottom: 4.5%" class="valign gdButton" src="assets/view.png" height="105%" onclick="location.href='level-info.html?id=${clean(String(x.id))}'"></a>`
 		let removeBtn = `<img title="Remove from saved" class="valign gdButton" src="assets/close.png" height="60%" style="margin-left: 1.5vh; cursor:pointer" onclick="removeSaved(event, ${clean(String(x.id))})">`
 
@@ -201,3 +198,4 @@ $(document).ready(function() { $(window).trigger('resize'); window.parent.postMe
 
 </script>
 <script src="menu-audio.js"></script>
+<!-- the end of the end -->
