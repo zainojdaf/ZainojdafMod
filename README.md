@@ -5,7 +5,7 @@
   alt="web-dashers logo" 
   src="https://github.com/user-attachments/assets/1b647556-ef74-47f9-be61-46696c57f04e" 
   />
-  <h1>Web Dashers</h1>
+  <h1>Zainojdaf Mod</h1>
   <p>
   <strong>A Modded Geometry Dash demo with extra features added! (See list below!) </strong>
   </p>
@@ -36,22 +36,22 @@
 
 ## Features currently implemented:
 - **Main Menu** - A mostly fully working main menu with all 2.1 levels.
-- **Custom Levels** - Some custom levels added in the main menu such as The Nightmare, Bloodbath, Nine Circles, and more!
+- **Level Search** - Fully working level search with alot of filters and features!
 - **Icon kit** - A working Icon Kit with different colors and icons to choose from!
-- **Different Gamemodes** - Multiple working gamemodes such as the Ball, Wave, Cube, UFO, Mini portals and Speed portals!
-- **Extra Settings** - You can enable and disable Noclip or Show Hitboxes from the pause menu in a level, along with other settings, like the level percentage!
-- **Account System** - You can save/load all level progress, and upload it to the cloud to keep your progress on different devices!
+- **Different Gamemodes** - Multiple working gamemodes such as the Ball, Wave, Cube, UFO, Ship, Robot and Spider, Mini portals, Speed portals, teleport portals and gravity portals!
+- **Extra Settings** - You can enable and disable Noclip or Show Hitboxes from the pause menu in a level, along with other settings, like the level percentage and hitbox trail!
+- **Account System (WORKS)** - You can save/load all level progress, and upload it to the cloud to keep your progress on different devices!
 
 ## Things currently in development:
 - **Practice Mode** - Although a early version of Practice mode is already in the game, we hope to make a completely working Practice Mode with no bugs at all.
 - **Level Editor** - We wish to add a fully working level editor, with all of the objects in Geometry Dash to choose from, and more!
-- **Slopes** - Slopes are never going to be done.
+- **Slopes** - Slopes are currently very wip and in developement by alot of people.
 
 ## What we hope to see added in the future:
 - **All Gamemodes** - This will allow every official main level to be playable, along with others that require currently un-implemented gamemodes.
-- **All Objects Working** - In the current state of Web Dashers, you might notice most objects seem to be bugged and/or not showing.
+- **All Objects Working** - In the current state of Zainojdaf Mod, you might notice most objects seem to be bugged and/or not showing.
 
-### Come try out the WIP Web Dashers demo at:
+### Come try out Zainojdaf Mod at:
 **[zainojdaf.github.io/ZainojdafMod/](https://zainojdaf.github.io/ZainojdafMod/)**
 
 *(Last updated 7/6/2026)*
