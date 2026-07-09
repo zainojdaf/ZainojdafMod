@@ -365,6 +365,19 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       const rows = Math.ceil(menuButtons.length / cols);
       const gridH = rows * btnSize + (rows - 1) * gapY;
       const gridStartY = sh / 2 - gridH / 2 + btnSize / 2;
+      const disabledButtonFrames = new Set([
+        "GJ_dailyBtn_001.png",
+        "GJ_weeklyBtn_001.png",
+        "GJ_eventBtn_001.png",
+        "GJ_mapBtn_001.png",
+        "GJ_mapPacksBtn_001.png",
+        "GJ_listsBtn_001.png",
+        "GJ_gauntletsBtn_001.png",
+        "GJ_pathsBtn_001.png",
+        "GJ_highscoreBtn_001.png",
+        "GJ_challengeBtn_001.png",
+        "GJ_versusBtn_001.png"
+      ]);
       menuButtons.forEach((frame, idx) => {
         const col = idx % cols;
         const row = Math.floor(idx / cols);
@@ -376,7 +389,13 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
         const isFeaturedButton = frame === "GJ_featuredBtn_001.png";
         const isSavedButton = frame === "GJ_savedBtn_001.png";
         const isEditorButton = frame === "GJ_createBtn_001.png";
-        if (isSearchButton) {
+        const isDisabledButton = disabledButtonFrames.has(frame);
+        if (isDisabledButton) {
+          btn.setInteractive();
+          btn.setTint(0x7f7f7f);
+          btn.setAlpha(0.85);
+          this._makeBouncyButton(btn, btnScale, () => {}, () => true);
+        } else if (isSearchButton) {
           btn.setInteractive();
           this._makeBouncyButton(btn, btnScale, () => {
             this._closeCreatorMenu(true);
