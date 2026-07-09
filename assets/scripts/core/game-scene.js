@@ -3831,11 +3831,11 @@ const chestScale = 0.6;
 const chestLeft = this.add.image(chestLeftX, chestY, "chest_free_closed")
   .setInteractive()
   .setScale(chestScale)
-  .setOrigin(0.5, 1); // confusing??
+  .setOrigin(0.5, 0.5); // confusing??
 const chestRight = this.add.image(chestRightX, chestY, "chest_ad_closed")
   .setInteractive()
   .setScale(chestScale)
-  .setOrigin(0.5, 1);
+  .setOrigin(0.5, 0.5);
 panelContainer.add(chestLeft);
 panelContainer.add(chestRight);
 
@@ -3847,8 +3847,8 @@ panelContainer.add(openLabelLeft);
 panelContainer.add(openLabelRight);
 
   // bouncy animation
-  this._makeBouncyButton(chestLeft, 0.6, () => {}, () => this._dailyRewardPopup);
-  this._makeBouncyButton(chestRight, 0.6, () => {}, () => this._dailyRewardPopup);
+  this._makeBouncyButton(chestLeft, 0.6, () => { /* open chest */ }, () => this._dailyRewardPopup);
+  this._makeBouncyButton(chestRight, 0.6, () => { /* open chest */ }, () => this._dailyRewardPopup);
 
   const closeBtn = this.add.image(-410, -250, "GJ_WebSheet", "GJ_closeBtn_001.png")
     .setScale(0.8)
