@@ -3810,10 +3810,10 @@ _buildDailyRewardPopup() {
   const halfW = panelW / 2;
   const halfH = panelH / 2;
   const cornerInset = 14;
-  const cornerTL = this.add.image(-halfW + cornerInset, -halfH + cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(-0.05, 0.05).setFlipY(true);
-  const cornerTR = this.add.image(halfW - cornerInset, -halfH + cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(1.05, 0.05).setFlipX(true).setFlipY(true);
-  const cornerBL = this.add.image(-halfW + cornerInset, halfH - cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(-0.05, 1.05);
-  const cornerBR = this.add.image(halfW - cornerInset, halfH - cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(1.05, 1.05).setFlipX(true);
+  const cornerTL = this.add.image(-halfW + cornerInset, -halfH + cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.1, 0.1).setFlipY(true);
+  const cornerTR = this.add.image(halfW - cornerInset, -halfH + cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.9, -0.1).setFlipX(true).setFlipY(true);
+  const cornerBL = this.add.image(-halfW + cornerInset, halfH - cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.1, 0.9);
+  const cornerBR = this.add.image(halfW - cornerInset, halfH - cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.9, 0.9).setFlipX(true);
   panelContainer.add(cornerTL);
   panelContainer.add(cornerTR);
   panelContainer.add(cornerBL);
@@ -3826,22 +3826,22 @@ _buildDailyRewardPopup() {
   const chestY = 20;
   const chestLeftX = -150;
   const chestRightX = 150;
-  const chestLeft = this.add.image(chestLeftX, chestY, "chest_free_closed").setInteractive().setScale(0.4);
-  const chestRight = this.add.image(chestRightX, chestY, "chest_ad_closed").setInteractive().setScale(0.4);
+  const chestLeft = this.add.image(chestLeftX, chestY, "chest_free_closed").setInteractive().setScale(0.6);
+  const chestRight = this.add.image(chestRightX, chestY, "chest_ad_closed").setInteractive().setScale(0.6);
   panelContainer.add(chestLeft);
   panelContainer.add(chestRight);
 
   const labelY = chestY + 90;
-  const openLabelLeft = this.add.bitmapText(chestLeftX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0.5);
-  const openLabelRight = this.add.bitmapText(chestRightX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0.5);
+  const openLabelLeft = this.add.bitmapText(chestLeftX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0.3);
+  const openLabelRight = this.add.bitmapText(chestRightX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0.3);
   panelContainer.add(openLabelLeft);
   panelContainer.add(openLabelRight);
 
   // bouncy animation
-  this._makeBouncyButton(chestLeft, 0.4, () => {}, () => this._dailyRewardPopup);
-  this._makeBouncyButton(chestRight, 0.4, () => {}, () => this._dailyRewardPopup);
+  this._makeBouncyButton(chestLeft, 0.6, () => {}, () => this._dailyRewardPopup);
+  this._makeBouncyButton(chestRight, 0.6, () => {}, () => this._dailyRewardPopup);
 
-  const closeBtn = this.add.image(-400, -250, "GJ_WebSheet", "GJ_closeBtn_001.png")
+  const closeBtn = this.add.image(-410, -250, "GJ_WebSheet", "GJ_closeBtn_001.png")
     .setScale(0.8)
     .setInteractive();
   panelContainer.add(closeBtn);
