@@ -280,7 +280,7 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
     this._menuDailyChestBtn = this.add.image(centerX + 630, screenHeight - 360, "GJ_GameSheet03", "GJ_dailyRewardBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive();
     this._expandHitArea(this._menuDailyChestBtn, 1);
     this._makeBouncyButton(this._menuDailyChestBtn, 1, () => {
-      this.buildDailyRewardPopup();
+      this._buildDailyRewardPopup();
     }, () => this._menuActive && !this._dailyRewardPopup);
     this._menuNewgroundsBtn = this.add.image(centerX + 312, screenHeight - 90, "GJ_GameSheet03", "GJ_ngBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
     this._expandHitArea(this._menuNewgroundsBtn, 1);
@@ -3819,6 +3819,10 @@ _buildDailyRewardPopup() {
   panelContainer.add(cornerBL);
   panelContainer.add(cornerBR);
 
+  // title
+  const titleImg = this.add.image(0, -halfH + 60, "GJ_GameSheet03", "rewardsLabel_001.png").setOrigin(0.5, 0.5);
+  panelContainer.add(titleImg);
+
   // the chests
   const chestY = 20;
   const chestLeftX = -150;
@@ -3995,49 +3999,6 @@ _closeDailyRewardPopup() {
       this._infoPopup = null;
     }
   }
-    buildDailyRewardPopup() {
-      return this._buildDailyRewardPopup();
-    }
-    _buildDailyRewardPopup() {
-      if (this._dailyRewardPopup) {
-        return;
-      }
-      const xPos = screenWidth / 2;
-      const yPos = 320;
-      this._dailyRewardPopup = this.add.container(0, 0).setScrollFactor(0).setDepth(300);
-      const overlay = this.add.rectangle(xPos, yPos, screenWidth, screenHeight, 0, 100 / 255);
-      overlay.setInteractive();
-      this._dailyRewardPopup.add(overlay);
-
-      const panelContainer = this.add.container(xPos, yPos);
-      this._dailyRewardPopup.add(panelContainer);
-
-      const cornerRadius = this.textures.get("GJ_square02").source[0].width * 0.325;
-      const panelBg = this._drawScale9(0, 0, 700, 440, "GJ_square02", cornerRadius, 16777215, 1);
-      panelContainer.add(panelBg);
-
-      const closeBtn = this.add.image(-200 - 150, 222 - yPos - 110, "GJ_WebSheet", "GJ_closeBtn_001.png").setScale(0.8).setInteractive();
-      this._expandHitArea(closeBtn, 2);
-      this._makeBouncyButton(closeBtn, 0.8, () => this._closeDailyRewardPopup());
-      panelContainer.add(closeBtn);
-
-      const titleImg = this.add.image(0, -170, "GJ_GameSheet03", "rewardsLabel_001.png").setOrigin(0.5, 0.5).setScale(1);
-      panelContainer.add(titleImg);
-
-      panelContainer.setScale(0);
-      this.tweens.add({
-        targets: panelContainer,
-        scale: 1,
-        duration: 400,
-        ease: "Bounce.Out"
-      });
-    }
-    _closeDailyRewardPopup() {
-      if (this._dailyRewardPopup) {
-        this._dailyRewardPopup.destroy();
-        this._dailyRewardPopup = null;
-      }
-    }
  _buildHowToPlayPopup() {
   if (this._howToPlayPopup) {
     return;
