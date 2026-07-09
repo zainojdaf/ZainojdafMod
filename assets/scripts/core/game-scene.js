@@ -3823,20 +3823,28 @@ _buildDailyRewardPopup() {
   panelContainer.add(titleImg);
 
   // the chests
-  const chestLeftY = 18;
-  const chestRightY = 20;
-  const chestLeftX = -150;
-  const chestRightX = 150;
-  const chestLeft = this.add.image(chestLeftX, chestY, "chest_free_closed").setInteractive().setScale(0.6);
-  const chestRight = this.add.image(chestRightX, chestY, "chest_ad_closed").setInteractive().setScale(0.6);
-  panelContainer.add(chestLeft);
-  panelContainer.add(chestRight);
+const chestY = 20;
+const chestLeftX = -150;
+const chestRightX = 150;
+const chestScale = 0.6;
 
-  const labelY = chestY + 90;
-  const openLabelLeft = this.add.bitmapText(chestLeftX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0.15);
-  const openLabelRight = this.add.bitmapText(chestRightX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0.15);
-  panelContainer.add(openLabelLeft);
-  panelContainer.add(openLabelRight);
+const chestLeft = this.add.image(chestLeftX, chestY, "chest_free_closed")
+  .setInteractive()
+  .setScale(chestScale)
+  .setOrigin(0.5, 1); // confusing??
+const chestRight = this.add.image(chestRightX, chestY, "chest_ad_closed")
+  .setInteractive()
+  .setScale(chestScale)
+  .setOrigin(0.5, 1);
+panelContainer.add(chestLeft);
+panelContainer.add(chestRight);
+
+const labelGap = 20;
+const labelY = chestY + labelGap;
+const openLabelLeft = this.add.bitmapText(chestLeftX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0);
+const openLabelRight = this.add.bitmapText(chestRightX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0);
+panelContainer.add(openLabelLeft);
+panelContainer.add(openLabelRight);
 
   // bouncy animation
   this._makeBouncyButton(chestLeft, 0.6, () => {}, () => this._dailyRewardPopup);
