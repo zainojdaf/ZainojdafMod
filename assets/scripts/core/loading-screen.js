@@ -250,6 +250,8 @@ class BootScene extends Phaser.Scene {
       this.load.text("bigFontFnt", "assets/fonts/bigFont.fnt");
       this.load.image("square04_001", "assets/sprites/square04_001.png");
       this.load.image("GJ_square02", "assets/sprites/GJ_square02.png");
+      this.load.image("chest_free_closed", "assets/sprites/chests/chest_free_closed.png");
+      this.load.image("chest_ad_closed", "assets/sprites/chests/chest_ad_closed.png");
       this.load.image("GJ_square01", "assets/sprites/GJ_square01.png");
       this.load.image("square01_001", "assets/sprites/square01_001.png");
       this.load.image("loadingCircle", "assets/sprites/loadingCircle.png");

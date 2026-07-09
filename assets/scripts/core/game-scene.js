@@ -3819,16 +3819,15 @@ _buildDailyRewardPopup() {
   panelContainer.add(cornerBL);
   panelContainer.add(cornerBR);
 
-  // title
-  const titleImg = this.add.image(0, -halfH + 60, "GJ_GameSheet03", "rewardsLabel_001.png").setOrigin(0.5, 0.5);
+  const titleImg = this.add.image(0, -halfH + 55, "GJ_GameSheet03", "rewardsLabel_001.png").setOrigin(0.5, 0.5).setScale(1);
   panelContainer.add(titleImg);
 
   // the chests
   const chestY = 20;
   const chestLeftX = -150;
   const chestRightX = 150;
-  const chestLeft = this.add.image(chestLeftX, chestY, "GJ_GameSheet03", "GJ_freeChestBtn_001.png").setInteractive().setScale(2);
-  const chestRight = this.add.image(chestRightX, chestY, "GJ_GameSheet03", "GJ_adChestBtn_001.png").setInteractive().setScale(2.0);
+  const chestLeft = this.add.image(chestLeftX, chestY, "chest_free_closed").setInteractive().setScale(1);
+  const chestRight = this.add.image(chestRightX, chestY, "chest_ad_closed").setInteractive().setScale(1);
   panelContainer.add(chestLeft);
   panelContainer.add(chestRight);
 
@@ -3842,7 +3841,7 @@ _buildDailyRewardPopup() {
   this._makeBouncyButton(chestLeft, 2, () => {}, () => this._dailyRewardPopup);
   this._makeBouncyButton(chestRight, 2.0, () => {}, () => this._dailyRewardPopup);
 
-  const closeBtn = this.add.image(380, -250, "GJ_WebSheet", "GJ_closeBtn_001.png")
+  const closeBtn = this.add.image(-380, -250, "GJ_WebSheet", "GJ_closeBtn_001.png")
     .setScale(0.8)
     .setInteractive();
   panelContainer.add(closeBtn);
