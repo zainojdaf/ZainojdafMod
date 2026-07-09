@@ -3810,10 +3810,10 @@ _buildDailyRewardPopup() {
   const halfW = panelW / 2;
   const halfH = panelH / 2;
   const cornerInset = 14;
-  const cornerTL = this.add.image(-halfW + cornerInset, -halfH + cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.1, 0.1).setFlipY(true);
-  const cornerTR = this.add.image(halfW - cornerInset, -halfH + cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.9, -0.1).setFlipX(true).setFlipY(true);
-  const cornerBL = this.add.image(-halfW + cornerInset, halfH - cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.1, 0.9);
-  const cornerBR = this.add.image(halfW - cornerInset, halfH - cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.9, 0.9).setFlipX(true);
+  const cornerTL = this.add.image(-halfW + cornerInset, -halfH + cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.12, 0.12).setFlipY(true);
+  const cornerTR = this.add.image(halfW - cornerInset, -halfH + cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.88, 0.12).setFlipX(true).setFlipY(true);
+  const cornerBL = this.add.image(-halfW + cornerInset, halfH - cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.12, 0.88);
+  const cornerBR = this.add.image(halfW - cornerInset, halfH - cornerInset, "GJ_GameSheet03", "rewardCorner_001.png").setOrigin(0.88, 0.88).setFlipX(true);
   panelContainer.add(cornerTL);
   panelContainer.add(cornerTR);
   panelContainer.add(cornerBL);
@@ -3823,7 +3823,8 @@ _buildDailyRewardPopup() {
   panelContainer.add(titleImg);
 
   // the chests
-  const chestY = 20;
+  const chestLeftY = 18;
+  const chestRightY = 20;
   const chestLeftX = -150;
   const chestRightX = 150;
   const chestLeft = this.add.image(chestLeftX, chestY, "chest_free_closed").setInteractive().setScale(0.6);
@@ -3832,8 +3833,8 @@ _buildDailyRewardPopup() {
   panelContainer.add(chestRight);
 
   const labelY = chestY + 90;
-  const openLabelLeft = this.add.bitmapText(chestLeftX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0.3);
-  const openLabelRight = this.add.bitmapText(chestRightX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0.3);
+  const openLabelLeft = this.add.bitmapText(chestLeftX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0.15);
+  const openLabelRight = this.add.bitmapText(chestRightX, labelY, "bigFont", "Open", 36).setOrigin(0.5, 0.15);
   panelContainer.add(openLabelLeft);
   panelContainer.add(openLabelRight);
 
