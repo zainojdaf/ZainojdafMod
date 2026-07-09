@@ -3831,7 +3831,7 @@ const chestScale = 0.6;
 const chestLeft = this.add.image(chestLeftX, chestY, "chest_free_closed")
   .setInteractive()
   .setScale(chestScale)
-  .setOrigin(0.5, 0.4); // confusing??
+  .setOrigin(0.5, 0.385); // confusing??
 const chestRight = this.add.image(chestRightX, chestY, "chest_ad_closed")
   .setInteractive()
   .setScale(chestScale)
@@ -3841,8 +3841,8 @@ panelContainer.add(chestRight);
 
 const labelGap = 20;
 const labelY = chestY + labelGap;
-const openLabelLeft = this.add.bitmapText(chestLeftX, labelY, "bigFont", "Open", 36).setOrigin(0.5, -0.3);
-const openLabelRight = this.add.bitmapText(chestRightX, labelY, "bigFont", "Open", 36).setOrigin(0.5, -0.3);
+const openLabelLeft = this.add.bitmapText(chestLeftX, labelY, "bigFont", "Open", 36).setOrigin(0.5, -0.8);
+const openLabelRight = this.add.bitmapText(chestRightX, labelY, "bigFont", "Open", 36).setOrigin(0.5, -0.8);
 panelContainer.add(openLabelLeft);
 panelContainer.add(openLabelRight);
 
