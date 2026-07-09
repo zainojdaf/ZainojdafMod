@@ -3839,7 +3839,7 @@ const chestRight = this.add.image(chestRightX, chestY, "chest_ad_closed")
 panelContainer.add(chestLeft);
 panelContainer.add(chestRight);
 
-const labelGap = 50;
+const labelGap = 80;
 const labelY = chestY + labelGap;
 const openLabelLeft = this.add.bitmapText(chestLeftX, labelY, "bigFont", "Open", 36).setOrigin(0.5, -0.8);
 const openLabelRight = this.add.bitmapText(chestRightX, labelY, "bigFont", "Open", 36).setOrigin(0.5, -0.8);
