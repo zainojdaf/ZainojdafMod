@@ -8847,19 +8847,16 @@ _showAchievementsScreen() {
 
     const containerX = screenWidth / 2;
 
-    // Overlay — exact same as stats screen
     this._achieveOverlay = this.add.rectangle(containerX, 320, screenWidth, screenHeight, 0, 0)
       .setScrollFactor(0).setDepth(200).setInteractive();
     this.tweens.add({ targets: this._achieveOverlay, alpha: 100/255, duration: 1000 });
 
-    // Container — starts at y=-640, tweens to y=10, EXACT same as stats
     this._achieveLayerInternal = this.add.container(0, -640).setScrollFactor(0).setDepth(201);
     const _ap = { p: 0 };
 
-    // Geometry mask — redrawn based on container's actual screen Y
     const maskGfx = this.make.graphics({ x: 0, y: 0, add: false });
     this._achieveMaskGfx = maskGfx;
-    const rowCont = this.add.container(0, 0);  // declared here so mask fn can reference it
+    const rowCont = this.add.container(0, 0);
 
     const applyMask = () => {
       const contY = this._achieveLayerInternal ? this._achieveLayerInternal.y : 10;
@@ -8876,20 +8873,17 @@ _showAchievementsScreen() {
         applyMask();
         rowCont.setVisible(true);
       },
-      onComplete: () => applyMask()  // final precise mask at rest position
+      onComplete: () => applyMask()
     });
 
-    // Frame — exact same dimensions and coords as stats screen
     const tableW  = 712;
     const tableH  = 460;
-    const tableX  = (screenWidth - tableW) / 2;  // left edge
+    const tableX  = (screenWidth - tableW) / 2;
 
-    // Brown bg
     this._achieveLayerInternal.add(
       this.add.rectangle(tableX + 356, 310, tableW, tableH, 0xac531e)
     );
 
-    // Side borders
     const sideFrame = this.textures.getFrame('GJ_WebSheet', 'GJ_table_side_001.png');
     const sideScaleY = sideFrame ? tableH / sideFrame.height : 1;
     this._achieveLayerInternal.add(
@@ -8901,14 +8895,12 @@ _showAchievementsScreen() {
         .setOrigin(1, 0).setFlipX(true).setScale(1, sideScaleY)
     );
 
-    // Top / bottom borders
     const topImg = this.add.image(tableX + 356, 70, 'GJ_WebSheet', 'GJ_table_top_001.png');
     this._achieveLayerInternal.add(topImg);
     this._achieveLayerInternal.add(
       this.add.image(tableX + 356, 560, 'GJ_WebSheet', 'GJ_table_bottom_001.png')
     );
 
-    // Chains
     this._achieveLayerInternal.add(
       this.add.image(containerX - 312, topImg.y - 35, 'GJ_WebSheet', 'chain_01_001.png').setOrigin(0.5, 1)
     );
@@ -8916,17 +8908,14 @@ _showAchievementsScreen() {
       this.add.image(containerX + 312, topImg.y - 35, 'GJ_WebSheet', 'chain_01_001.png').setOrigin(0.5, 1)
     );
 
-    // Title
     this._achieveLayerInternal.add(
       this.add.bitmapText(containerX, 65, 'bigFont', 'Achievements', 48).setOrigin(0.5, 0.5)
     );
 
-    // Page label
     const pageLbl = this.add.bitmapText(tableX + tableW - 4, 55, 'goldFont', '1 to 24 of 24', 20)
       .setOrigin(1, 0.5).setTint(0xffdd00);
     this._achieveLayerInternal.add(pageLbl);
 
-    // Achievements data
     const achievements = [
       { title: 'Stereo Madness!',        desc: 'Complete "Stereo Madness" in Normal mode',        done: (window._completedLevels||0) >= 1  },
       { title: 'Back on Track!',         desc: 'Complete "Back on Track" in Normal mode',          done: (window._completedLevels||0) >= 2  },
@@ -8954,7 +8943,7 @@ _showAchievementsScreen() {
       { title: '100 Jumps!',             desc: 'Jump 100 times total',                             done: (this._totalJumps||0) >= 100       },
     ];
 
-    // Row list — scrollable via mask, same row style as stats
+    // row list
     const rowH     = 156;
     const listTop  = 102;
     const listH    = 428;
@@ -8971,7 +8960,7 @@ _showAchievementsScreen() {
       rowCont.add(
         this.add.rectangle(containerX, ry, rowW, rowH, i % 2 === 0 ? 0xac531e : 0xcf6d30)
       );
-      // Separator line
+      // separator line
       if (i > 0) {
         rowCont.add(
           this.add.rectangle(containerX, listTop + i * rowH, rowW, 0.5, 0x000000)
@@ -8979,22 +8968,30 @@ _showAchievementsScreen() {
       }
       // Icon
       rowCont.add(
-        this.add.image(rowLeft + 70, ry, 'GJ_GameSheet03', 'GJ_lock_001.png')
-          .setScale(0.65).setTint(ach.done ? 0xffffff : 0x666666).setRotation(-Math.PI / -2)
+        this.add.image(rowLeft + 70, ry, ach.done ? "GJ_lock_open_001" : "GJ_lock_001")
+          .setScale(0.65).setTint(ach.done ? 0xffffff : 0x666666)
       );
       // Title
       rowCont.add(
         this.add.bitmapText(rowLeft + 138, ry - 45, 'goldFont', ach.title, 22)
-          .setOrigin(0, 0.5).setTint(ach.done ? 0xffffff : 0x999999).setScale(1.8)
+          .setOrigin(0, 0.5).setScale(1.8)
       );
       // Description
       rowCont.add(
-        this.add.bitmapText(rowLeft + 138, ry + 13, 'bigFont', ach.desc, 15)
-          .setOrigin(0, 0.5).setTint(ach.done ? 0xffffff : 0x666666).setScale(1.4)
+        this.add.text(rowLeft + 138, ry + 13, ach.desc, {
+          fontFamily: 'Arial',
+          fontSize: '21px',
+          color: '#ffffff',
+        }).setOrigin(0, 0.5)
       );
+      // Completed checkmark, right side of the row
+      if (ach.done) {
+        rowCont.add(
+          this.add.image(rowLeft + rowW - 60, ry, "GJ_completed_001").setScale(0.6)
+        );
+      }
     });
 
-    // Wheel scrolling
     const onWheel = (e) => {
       if (!this._achieveLayerInternal) return;
       scrollY = Phaser.Math.Clamp(scrollY + e.deltaY * 0.4, 0, maxScroll);
@@ -9004,7 +9001,6 @@ _showAchievementsScreen() {
     this.input.on('wheel', onWheel);
     this._achieveWheelCleanup = () => this.input.off('wheel', onWheel);
 
-    // Back button — same position as stats screen back button
     const backBtn = this.add.image(containerX - 535, 30, 'GJ_GameSheet03', 'GJ_arrow_03_001.png')
       .setInteractive();
     this._achieveLayerInternal.add(backBtn);
@@ -9027,7 +9023,6 @@ _showAchievementsScreen() {
       onUpdate: () => {
         if (!this._achieveLayerInternal) return;
         this._achieveLayerInternal.y = _ap.p * 650 - 640;
-        // Update mask to follow container so rows stay clipped while sliding out
         if (this._achieveMaskGfx) {
           this._achieveMaskGfx.clear();
           this._achieveMaskGfx.fillStyle(0xffffff);
