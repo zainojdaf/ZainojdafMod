@@ -274,9 +274,10 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       this._showStatsScreen();
     }, () => this._menuActive);
     this._menuAchievementsBtn = this.add.image(centerX - 18, screenHeight - 90, "GJ_GameSheet03", "GJ_achBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive();
-    this._expandHitArea(this._menuAchievementsBtn, 1);
+    this._expandHitArea(this._menuAchievementsBtn, 1.2);
     this._makeBouncyButton(this._menuAchievementsBtn, 1, () => {
-    }, () => this._menuActive);
+      if (!this._achievementsPopup) this._showAchievementsScreen();
+    }, () => this._menuActive && !this._achievementsPopup);
     this._menuDailyChestBtn = this.add.image(centerX + 630, screenHeight - 360, "GJ_GameSheet03", "GJ_dailyRewardBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive();
     this._expandHitArea(this._menuDailyChestBtn, 1);
     this._makeBouncyButton(this._menuDailyChestBtn, 1, () => {
@@ -2648,6 +2649,10 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       }
       if (this._statsLayerOverlay) {
         this._hideStatsScreen();
+        return;
+      }
+      if (this._achievementsPopup) {
+        this._hideAchievementsScreen();
         return;
       }
       if (this._paused) {
@@ -8836,4 +8841,206 @@ _applyMirrorEffect() {
       duration: 500
     });
   }
+_showAchievementsScreen() {
+    if (this._achievementsPopup) return;
+    this._achievementsPopup = true;
+
+    const containerX = screenWidth / 2;
+
+    // Overlay — exact same as stats screen
+    this._achieveOverlay = this.add.rectangle(containerX, 320, screenWidth, screenHeight, 0, 0)
+      .setScrollFactor(0).setDepth(200).setInteractive();
+    this.tweens.add({ targets: this._achieveOverlay, alpha: 100/255, duration: 1000 });
+
+    // Container — starts at y=-640, tweens to y=10, EXACT same as stats
+    this._achieveLayerInternal = this.add.container(0, -640).setScrollFactor(0).setDepth(201);
+    const _ap = { p: 0 };
+
+    // Geometry mask — redrawn based on container's actual screen Y
+    const maskGfx = this.make.graphics({ x: 0, y: 0, add: false });
+    this._achieveMaskGfx = maskGfx;
+    const rowCont = this.add.container(0, 0);  // declared here so mask fn can reference it
+
+    const applyMask = () => {
+      const contY = this._achieveLayerInternal ? this._achieveLayerInternal.y : 10;
+      maskGfx.clear();
+      maskGfx.fillStyle(0xffffff);
+      maskGfx.fillRect(rowLeft, listTop + contY, rowW, listH);
+      rowCont.setMask(maskGfx.createGeometryMask());
+    };
+
+    this.tweens.add({
+      targets: _ap, p: 1, duration: 500, ease: 'Quad.Out',
+      onUpdate: () => {
+        this._achieveLayerInternal.y = _ap.p * 650 - 640;
+        applyMask();
+        rowCont.setVisible(true);
+      },
+      onComplete: () => applyMask()  // final precise mask at rest position
+    });
+
+    // Frame — exact same dimensions and coords as stats screen
+    const tableW  = 712;
+    const tableH  = 460;
+    const tableX  = (screenWidth - tableW) / 2;  // left edge
+
+    // Brown bg
+    this._achieveLayerInternal.add(
+      this.add.rectangle(tableX + 356, 310, tableW, tableH, 0xac531e)
+    );
+
+    // Side borders
+    const sideFrame = this.textures.getFrame('GJ_WebSheet', 'GJ_table_side_001.png');
+    const sideScaleY = sideFrame ? tableH / sideFrame.height : 1;
+    this._achieveLayerInternal.add(
+      this.add.image(tableX - 40, 80, 'GJ_WebSheet', 'GJ_table_side_001.png')
+        .setOrigin(0, 0).setScale(1, sideScaleY)
+    );
+    this._achieveLayerInternal.add(
+      this.add.image(tableX + tableW + 40, 80, 'GJ_WebSheet', 'GJ_table_side_001.png')
+        .setOrigin(1, 0).setFlipX(true).setScale(1, sideScaleY)
+    );
+
+    // Top / bottom borders
+    const topImg = this.add.image(tableX + 356, 70, 'GJ_WebSheet', 'GJ_table_top_001.png');
+    this._achieveLayerInternal.add(topImg);
+    this._achieveLayerInternal.add(
+      this.add.image(tableX + 356, 560, 'GJ_WebSheet', 'GJ_table_bottom_001.png')
+    );
+
+    // Chains
+    this._achieveLayerInternal.add(
+      this.add.image(containerX - 312, topImg.y - 35, 'GJ_WebSheet', 'chain_01_001.png').setOrigin(0.5, 1)
+    );
+    this._achieveLayerInternal.add(
+      this.add.image(containerX + 312, topImg.y - 35, 'GJ_WebSheet', 'chain_01_001.png').setOrigin(0.5, 1)
+    );
+
+    // Title
+    this._achieveLayerInternal.add(
+      this.add.bitmapText(containerX, 65, 'bigFont', 'Achievements', 48).setOrigin(0.5, 0.5)
+    );
+
+    // Page label
+    const pageLbl = this.add.bitmapText(tableX + tableW - 4, 55, 'goldFont', '1 to 24 of 24', 20)
+      .setOrigin(1, 0.5).setTint(0xffdd00);
+    this._achieveLayerInternal.add(pageLbl);
+
+    // Achievements data
+    const achievements = [
+      { title: 'Stereo Madness!',        desc: 'Complete "Stereo Madness" in Normal mode',        done: (window._completedLevels||0) >= 1  },
+      { title: 'Back on Track!',         desc: 'Complete "Back on Track" in Normal mode',          done: (window._completedLevels||0) >= 2  },
+      { title: 'Polargeist!',            desc: 'Complete "Polargeist" in Normal mode',             done: (window._completedLevels||0) >= 3  },
+      { title: 'Dry Out!',               desc: 'Complete "Dry Out" in Normal mode',                done: (window._completedLevels||0) >= 4  },
+      { title: 'Base After Base!',       desc: 'Complete "Base After Base" in Normal mode',        done: (window._completedLevels||0) >= 5  },
+      { title: 'Cant Let Go!',           desc: 'Complete "Cant Let Go" in Normal mode',            done: (window._completedLevels||0) >= 6  },
+      { title: 'Jumper!',                desc: 'Complete "Jumper" in Normal mode',                 done: (window._completedLevels||0) >= 7  },
+      { title: 'Time Machine!',          desc: 'Complete "Time Machine" in Normal mode',           done: (window._completedLevels||0) >= 8  },
+      { title: 'Cycles!',                desc: 'Complete "Cycles" in Normal mode',                 done: (window._completedLevels||0) >= 9  },
+      { title: 'xStep!',                 desc: 'Complete "xStep" in Normal mode',                  done: (window._completedLevels||0) >= 10 },
+      { title: 'Clutterfunk!',           desc: 'Complete "Clutterfunk" in Normal mode',            done: (window._completedLevels||0) >= 11 },
+      { title: 'Theory of Everything!',  desc: 'Complete "Theory of Everything" in Normal mode',   done: (window._completedLevels||0) >= 12 },
+      { title: 'Electroman Adventures!', desc: 'Complete "Electroman Adventures" in Normal mode',  done: (window._completedLevels||0) >= 13 },
+      { title: 'Clubstep!',              desc: 'Complete "Clubstep" in Normal mode',               done: (window._completedLevels||0) >= 14 },
+      { title: 'Electrodynamix!',        desc: 'Complete "Electrodynamix" in Normal mode',         done: (window._completedLevels||0) >= 15 },
+      { title: 'Hexagon Force!',         desc: 'Complete "Hexagon Force" in Normal mode',          done: (window._completedLevels||0) >= 16 },
+      { title: 'Blast Processing!',      desc: 'Complete "Blast Processing" in Normal mode',       done: (window._completedLevels||0) >= 17 },
+      { title: 'ToE 2!',                 desc: 'Complete "Theory of Everything 2" in Normal mode', done: (window._completedLevels||0) >= 18 },
+      { title: 'Geometrical Dominator!', desc: 'Complete "Geometrical Dominator" in Normal mode',  done: (window._completedLevels||0) >= 19 },
+      { title: 'Deadlocked!',            desc: 'Complete "Deadlocked" in Normal mode',             done: (window._completedLevels||0) >= 20 },
+      { title: 'Fingerdash!',            desc: 'Complete "Fingerdash" in Normal mode',             done: (window._completedLevels||0) >= 21 },
+      { title: 'Web Dasher!',            desc: 'Play Web Dashers for the first time',              done: true                                },
+      { title: 'First Jump!',            desc: 'Jump for the first time',                          done: (this._totalJumps||0) >= 1         },
+      { title: '100 Jumps!',             desc: 'Jump 100 times total',                             done: (this._totalJumps||0) >= 100       },
+    ];
+
+    // Row list — scrollable via mask, same row style as stats
+    const rowH     = 156;
+    const listTop  = 102;
+    const listH    = 428;
+    const rowW     = tableW - 15.6;
+    const rowLeft  = tableX + 7.8;
+    let scrollY    = 0;
+    const maxScroll = Math.max(0, achievements.length * rowH - listH);
+
+    this._achieveLayerInternal.add(rowCont);
+    rowCont.setVisible(false);
+
+    achievements.forEach((ach, i) => {
+      const ry = listTop + i * rowH + rowH / 2;
+      rowCont.add(
+        this.add.rectangle(containerX, ry, rowW, rowH, i % 2 === 0 ? 0xac531e : 0xcf6d30)
+      );
+      // Separator line
+      if (i > 0) {
+        rowCont.add(
+          this.add.rectangle(containerX, listTop + i * rowH, rowW, 0.5, 0x000000)
+        );
+      }
+      // Icon
+      rowCont.add(
+        this.add.image(rowLeft + 70, ry, 'GJ_GameSheet03', 'GJ_lock_001.png')
+          .setScale(0.65).setTint(ach.done ? 0xffffff : 0x666666).setRotation(-Math.PI / -2)
+      );
+      // Title
+      rowCont.add(
+        this.add.bitmapText(rowLeft + 138, ry - 45, 'goldFont', ach.title, 22)
+          .setOrigin(0, 0.5).setTint(ach.done ? 0xffffff : 0x999999).setScale(1.8)
+      );
+      // Description
+      rowCont.add(
+        this.add.bitmapText(rowLeft + 138, ry + 13, 'bigFont', ach.desc, 15)
+          .setOrigin(0, 0.5).setTint(ach.done ? 0xffffff : 0x666666).setScale(1.4)
+      );
+    });
+
+    // Wheel scrolling
+    const onWheel = (e) => {
+      if (!this._achieveLayerInternal) return;
+      scrollY = Phaser.Math.Clamp(scrollY + e.deltaY * 0.4, 0, maxScroll);
+      rowCont.y = -scrollY;
+      applyMask();
+    };
+    this.input.on('wheel', onWheel);
+    this._achieveWheelCleanup = () => this.input.off('wheel', onWheel);
+
+    // Back button — same position as stats screen back button
+    const backBtn = this.add.image(containerX - 535, 30, 'GJ_GameSheet03', 'GJ_arrow_03_001.png')
+      .setInteractive();
+    this._achieveLayerInternal.add(backBtn);
+    this._makeBouncyButton(backBtn, 1, () => this._hideAchievementsScreen());
+  }
+
+  _hideAchievementsScreen() {
+    if (!this._achieveLayerInternal) return;
+    if (this._achieveWheelCleanup) { this._achieveWheelCleanup(); this._achieveWheelCleanup = null; }
+    const cleanup = () => {
+      if (this._achieveOverlay)       { this._achieveOverlay.destroy();       this._achieveOverlay = null; }
+      if (this._achieveLayerInternal) { this._achieveLayerInternal.destroy(); this._achieveLayerInternal = null; }
+      if (this._achieveMaskGfx)       { this._achieveMaskGfx.destroy();       this._achieveMaskGfx = null; }
+      this._achievementsPopup = false;
+    };
+    this.tweens.add({ targets: this._achieveOverlay, alpha: 0, duration: 500, ease: 'Linear' });
+    const _ap = { p: 1 };
+    this.tweens.add({
+      targets: _ap, p: 0, duration: 500, ease: 'Quad.In',
+      onUpdate: () => {
+        if (!this._achieveLayerInternal) return;
+        this._achieveLayerInternal.y = _ap.p * 650 - 640;
+        // Update mask to follow container so rows stay clipped while sliding out
+        if (this._achieveMaskGfx) {
+          this._achieveMaskGfx.clear();
+          this._achieveMaskGfx.fillStyle(0xffffff);
+          this._achieveMaskGfx.fillRect(
+            (screenWidth - 712) / 2 + 7.8,
+            102 + this._achieveLayerInternal.y,
+            712 - 15.6, 428
+          );
+        }
+      },
+      onComplete: cleanup
+    });
+  }
+
 }
+
