@@ -8950,9 +8950,8 @@ const pageLbl = this.add.bitmapText(tableX + tableW + 200, 5, 'goldFont', '', 20
     const maxScroll = Math.max(0, perPage * rowH - listH);
 
     const updatePageLbl = () => {
-    const pageStart = currentPage * perPage;
-    const first = pageStart + Math.floor(scrollY / rowH) + 1;
-    const last = Math.min(achievements.length, pageStart + Math.ceil((scrollY + listH) / rowH));
+    const first = currentPage === 0 ? 1 : currentPage * perPage;
+    const last = Math.min(achievements.length, (currentPage + 1) * perPage);
     pageLbl.setText(`${first} to ${last} of ${achievements.length}`);
     };
 
@@ -9015,14 +9014,13 @@ const pageLbl = this.add.bitmapText(tableX + tableW + 200, 5, 'goldFont', '', 20
    scrollY = Phaser.Math.Clamp(scrollY + e.deltaY * 0.4, 0, maxScroll);
    rowCont.y = -scrollY;
    applyMask();
-   updatePageLbl();
 };
     this.input.on('wheel', onWheel);
     this._achieveWheelCleanup = () => this.input.off('wheel', onWheel);
 
-    const leftArrow = this.add.image(containerX - 380, listTop + 214, "GJ_GameSheet03", "GJ_arrow_01_001.png")
+    const leftArrow = this.add.image(containerX - 480, listTop + 214, "GJ_GameSheet03", "GJ_arrow_01_001.png")
       .setInteractive();
-    const rightArrow = this.add.image(containerX + 380, listTop + 214, "GJ_GameSheet03", "GJ_arrow_01_001.png")
+    const rightArrow = this.add.image(containerX + 480, listTop + 214, "GJ_GameSheet03", "GJ_arrow_01_001.png")
       .setFlipX(true).setInteractive();
     this._achieveLayerInternal.add(leftArrow);
     this._achieveLayerInternal.add(rightArrow);
