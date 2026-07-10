@@ -214,8 +214,8 @@ class BootScene extends Phaser.Scene {
       this.add.bitmapText(cx, cy + 187, "goldFont", msg, 30).setOrigin(0.5);
       const robtopLogo = this.add.image(cx, cy - 120, "GJ_LaunchSheet", "RobTopLogoBig_001.png").setOrigin(0.5).setScale(0.8);
       const gjLogo = this.add.image(cx, cy, "GJ_LaunchSheet", "GJ_logo_001.png").setOrigin(0.5);
-      const fmodLogo = this.add.image(cx + 90, cy + 15, "GJ_LaunchSheet", "fmodLogo.png").setOrigin(1, 0.1).setScale(0.7);
-      const cocos2dxLogo = this.add.image(cx + 90, cy + 0, "GJ_LaunchSheet", "cocos2DxLogo.png").setOrigin(1, 0).setScale(0.7);
+      const fmodLogo = this.add.image(cx + 560, cy + 245, "GJ_LaunchSheet", "fmodLogo.png").setOrigin(1, 0.1).setScale(0.7).setTint(0x000000);
+      const cocos2dxLogo = this.add.image(cx + 560, cy + 280, "GJ_LaunchSheet", "cocos2DxLogo.png").setOrigin(1, 0).setScale(0.7);
       this.children.bringToTop(robtopLogo);
       this.children.bringToTop(gjLogo);
       if (window.gameCache) {

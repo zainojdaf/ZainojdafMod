@@ -8917,7 +8917,7 @@ _showAchievementsScreen() {
     this._achieveLayerInternal.add(pageLbl);
 
     const achievements = [
-      { title: 'Stereo Madness!',        desc: 'Complete "Stereo Madness" in Normal mode',        done: (window._completedLevels||0) >= 1  },
+      { title: 'Stereo Madness!',        desc: 'Complete "Stereo Madness" in Normal mode',         done: (window._completedLevels||0) >= 1  },
       { title: 'Back on Track!',         desc: 'Complete "Back on Track" in Normal mode',          done: (window._completedLevels||0) >= 2  },
       { title: 'Polargeist!',            desc: 'Complete "Polargeist" in Normal mode',             done: (window._completedLevels||0) >= 3  },
       { title: 'Dry Out!',               desc: 'Complete "Dry Out" in Normal mode',                done: (window._completedLevels||0) >= 4  },
@@ -8932,15 +8932,15 @@ _showAchievementsScreen() {
       { title: 'Electroman Adventures!', desc: 'Complete "Electroman Adventures" in Normal mode',  done: (window._completedLevels||0) >= 13 },
       { title: 'Clubstep!',              desc: 'Complete "Clubstep" in Normal mode',               done: (window._completedLevels||0) >= 14 },
       { title: 'Electrodynamix!',        desc: 'Complete "Electrodynamix" in Normal mode',         done: (window._completedLevels||0) >= 15 },
-      { title: 'Hexagon Force!',         desc: 'Complete "Hexagon Force" in Normal mode',          done: (window._completedLevels||0) >= 16 },
       { title: 'Blast Processing!',      desc: 'Complete "Blast Processing" in Normal mode',       done: (window._completedLevels||0) >= 17 },
-      { title: 'ToE 2!',                 desc: 'Complete "Theory of Everything 2" in Normal mode', done: (window._completedLevels||0) >= 18 },
-      { title: 'Geometrical Dominator!', desc: 'Complete "Geometrical Dominator" in Normal mode',  done: (window._completedLevels||0) >= 19 },
-      { title: 'Deadlocked!',            desc: 'Complete "Deadlocked" in Normal mode',             done: (window._completedLevels||0) >= 20 },
       { title: 'Fingerdash!',            desc: 'Complete "Fingerdash" in Normal mode',             done: (window._completedLevels||0) >= 21 },
-      { title: 'Web Dasher!',            desc: 'Play Web Dashers for the first time',              done: true                                },
+      { title: 'Thats why we Dash!',     desc: 'Play Web Dashers for the first time',              done: true                                },
       { title: 'First Jump!',            desc: 'Jump for the first time',                          done: (this._totalJumps||0) >= 1         },
       { title: '100 Jumps!',             desc: 'Jump 100 times total',                             done: (this._totalJumps||0) >= 100       },
+      { title: '1000 Jumps!',             desc: 'Jump 1000 times total',                           done: (this._totalJumps||0) >= 1000       },
+      { title: '100 Attempts!',             desc: 'Dont give up 100 times',                        done: (this._totalAttempts||0) >= 100       },
+      { title: '1000 Attempts!',             desc: 'Dont give up 1000 times',                      done: (this._totalAttempts||0) >= 1000       },
+      { title: '10000 Attempts!',             desc: 'Dont give up 10000 times',                    done: (this._totalAttempts||0) >= 10000       },
     ];
 
     // row list
@@ -8966,25 +8966,30 @@ _showAchievementsScreen() {
           this.add.rectangle(containerX, listTop + i * rowH, rowW, 0.5, 0x000000)
         );
       }
-      // Icon
+      // lock
       rowCont.add(
         this.add.image(rowLeft + 70, ry, ach.done ? "GJ_lock_open_001" : "GJ_lock_001")
-          .setScale(0.65).setTint(ach.done ? 0xffffff : 0x666666)
+          .setScale(0.65)
       );
-      // Title
+      // title
       rowCont.add(
-        this.add.bitmapText(rowLeft + 138, ry - 45, 'goldFont', ach.title, 22)
+        this.add.bitmapText(rowLeft + 128, ry - 45, 'goldFont', ach.title, 22)
           .setOrigin(0, 0.5).setScale(1.8)
       );
-      // Description
+      // description
       rowCont.add(
-        this.add.text(rowLeft + 138, ry + 13, ach.desc, {
+        this.add.text(rowLeft + 130, ry + 13, ach.desc, {
           fontFamily: 'Arial',
-          fontSize: '21px',
+          fontSize: '31px',
           color: '#ffffff',
+          // uhh so this makes it not go out of the border so it becomes a second line hope you understand
+          wordWrap: { 
+            width: rowW - 220, 
+            useAdvancedWrap: true 
+          }
         }).setOrigin(0, 0.5)
       );
-      // Completed checkmark, right side of the row
+      // checkmark
       if (ach.done) {
         rowCont.add(
           this.add.image(rowLeft + rowW - 60, ry, "GJ_completed_001").setScale(0.6)
