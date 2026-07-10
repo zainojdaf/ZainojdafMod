@@ -258,11 +258,6 @@ this._menuFsBtn = this.add.image(33, 33, "GJ_WebSheet", _0x28fa5b ? "toggleFulls
       this._expandHitArea(this._menuFsBtn, 1.5);
       this._toggleFullscreen();
     }, () => this._menuActive);
-    this._menuInfoBtn = this.add.image(screenWidth + 20, 33, "GJ_GameSheet03", "communityCreditsBtn_001.png").setScrollFactor(0).setDepth(30).setScale(0.64).setTint(Phaser.Display.Color.GetColor(255, 255, 255)).setInteractive();
-    this._expandHitArea(this._menuInfoBtn, 1.5);
-    this._makeBouncyButton(this._menuInfoBtn, 0.64, () => {
-      this._buildInfoPopup();
-    }, () => this._menuActive && !this._infoPopup);
     this._menuSettingsBtn = this.add.image(centerX + 92, screenHeight - 90, "GJ_GameSheet03", "GJ_optionsBtn_001.png").setScrollFactor(0).setDepth(30).setInteractive().setRotation(-Math.PI / 2).setFlipX(true);
     this._expandHitArea(this._menuSettingsBtn, 1);
     this._makeBouncyButton(this._menuSettingsBtn, 1, () => {
@@ -7947,7 +7942,7 @@ _applyMirrorEffect() {
     _makeSettingsBtn(_sColR, _sRow2Y, "Graphics",   _sBtnW2, true,  () => { this._buildGraphicsPopup(); });
     _makeSettingsBtn(_sCol3L, _sRow3Y, "Rate",      _sBtnW3, true,  () => { this._buildRatePopup(); });
     _makeSettingsBtn(_sCol3M, _sRow3Y, "Songs",     _sBtnW3, true,  () => { this._buildSongsPopup(); });
-    _makeSettingsBtn(_sCol3R, _sRow3Y, "Help",      _sBtnW3, true,  () => { this._buildHelpPopup(); });
+    _makeSettingsBtn(_sCol3R, _sRow3Y, "Credit",      _sBtnW3, true,  () => { this._buildInfoPopup(); });
 
     const lockIcon = this.add.image(containerX + 535, 30, "GJ_GameSheet03", "GJ_lock_open_001.png").setFlipX(false).setFlipY(false);
     lockIcon.setScale(0.9);
@@ -8912,8 +8907,8 @@ _showAchievementsScreen() {
       this.add.bitmapText(containerX, 65, 'bigFont', 'Achievements', 48).setOrigin(0.5, 0.5)
     );
 
-    const pageLbl = this.add.bitmapText(tableX + tableW - 4, 55, 'goldFont', '1 to 24 of 24', 20)
-      .setOrigin(1, 0.5).setTint(0xffdd00);
+    const pageLbl = this.add.bitmapText(tableX + tableW + 200, 5, 'goldFont', '', 20)
+    .setOrigin(1, 0.5).setTint(0xffdd00).setScale(1.4);
     this._achieveLayerInternal.add(pageLbl);
 
     const achievements = [
@@ -8952,6 +8947,13 @@ _showAchievementsScreen() {
     let scrollY    = 0;
     const maxScroll = Math.max(0, achievements.length * rowH - listH);
 
+    const updatePageLbl = () => {
+    const first = Math.floor(scrollY / rowH) + 1;
+    const last = Math.min(achievements.length, Math.ceil((scrollY + listH) / rowH));
+    pageLbl.setText(`${first} to ${last} of ${achievements.length}`);
+    };
+    updatePageLbl();
+
     this._achieveLayerInternal.add(rowCont);
     rowCont.setVisible(false);
 
@@ -8980,7 +8982,7 @@ _showAchievementsScreen() {
       rowCont.add(
         this.add.text(rowLeft + 130, ry + 13, ach.desc, {
           fontFamily: 'Arial',
-          fontSize: '31px',
+          fontSize: '27px',
           color: '#ffffff',
           // uhh so this makes it not go out of the border so it becomes a second line hope you understand
           wordWrap: { 
@@ -8997,12 +8999,13 @@ _showAchievementsScreen() {
       }
     });
 
-    const onWheel = (e) => {
-      if (!this._achieveLayerInternal) return;
-      scrollY = Phaser.Math.Clamp(scrollY + e.deltaY * 0.4, 0, maxScroll);
-      rowCont.y = -scrollY;
-      applyMask();
-    };
+   const onWheel = (e) => {
+   if (!this._achieveLayerInternal) return;
+   scrollY = Phaser.Math.Clamp(scrollY + e.deltaY * 0.4, 0, maxScroll);
+   rowCont.y = -scrollY;
+   applyMask();
+   updatePageLbl();
+};
     this.input.on('wheel', onWheel);
     this._achieveWheelCleanup = () => this.input.off('wheel', onWheel);
 
