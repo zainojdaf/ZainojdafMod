@@ -8907,7 +8907,7 @@ _showAchievementsScreen() {
       this.add.bitmapText(containerX, 65, 'bigFont', 'Achievements', 48).setOrigin(0.5, 0.5)
     );
 
-    const pageLbl = this.add.bitmapText(tableX + tableW + 200, 5, 'goldFont', '', 20)
+const pageLbl = this.add.bitmapText(tableX + tableW + 200, 5, 'goldFont', '', 20)
     .setOrigin(1, 0.5).setTint(0xffdd00).setScale(1.4);
     this._achieveLayerInternal.add(pageLbl);
 
@@ -8938,76 +8938,99 @@ _showAchievementsScreen() {
       { title: '10000 Attempts!',             desc: 'Dont give up 10000 times',                    done: (this._totalAttempts||0) >= 10000       },
     ];
 
-    // row list
     const rowH     = 156;
     const listTop  = 102;
     const listH    = 428;
     const rowW     = tableW - 15.6;
     const rowLeft  = tableX + 7.8;
     let scrollY    = 0;
-    const maxScroll = Math.max(0, achievements.length * rowH - listH);
+    const perPage  = 6;
+    const totalPages = Math.ceil(achievements.length / perPage);
+    let currentPage = 0;
+    const maxScroll = Math.max(0, perPage * rowH - listH);
 
     const updatePageLbl = () => {
-    const first = Math.floor(scrollY / rowH) + 1;
-    const last = Math.min(achievements.length, Math.ceil((scrollY + listH) / rowH));
+    const first = currentPage === 0 ? 1 : currentPage * perPage;
+    const last = Math.min(achievements.length, (currentPage + 1) * perPage);
     pageLbl.setText(`${first} to ${last} of ${achievements.length}`);
     };
-    updatePageLbl();
 
     this._achieveLayerInternal.add(rowCont);
     rowCont.setVisible(false);
 
-    achievements.forEach((ach, i) => {
-      const ry = listTop + i * rowH + rowH / 2;
-      rowCont.add(
-        this.add.rectangle(containerX, ry, rowW, rowH, i % 2 === 0 ? 0xac531e : 0xcf6d30)
-      );
-      // separator line
-      if (i > 0) {
+    const renderPage = (page) => {
+      rowCont.removeAll(true);
+      scrollY = 0;
+      rowCont.y = 0;
+
+      const startIdx = page * perPage;
+      const pageItems = achievements.slice(startIdx, startIdx + perPage);
+
+      pageItems.forEach((ach, i) => {
+        const ry = listTop + i * rowH + rowH / 2;
         rowCont.add(
-          this.add.rectangle(containerX, listTop + i * rowH, rowW, 0.5, 0x000000)
+          this.add.rectangle(containerX, ry, rowW, rowH, i % 2 === 0 ? 0xac531e : 0xcf6d30)
         );
-      }
-      // lock
-      rowCont.add(
-        this.add.image(rowLeft + 70, ry, ach.done ? "GJ_lock_open_001" : "GJ_lock_001")
-          .setScale(0.65)
-      );
-      // title
-      rowCont.add(
-        this.add.bitmapText(rowLeft + 128, ry - 45, 'goldFont', ach.title, 22)
-          .setOrigin(0, 0.5).setScale(1.8)
-      );
-      // description
-      rowCont.add(
-        this.add.text(rowLeft + 130, ry + 13, ach.desc, {
-          fontFamily: 'Arial',
-          fontSize: '27px',
-          color: '#ffffff',
-          // uhh so this makes it not go out of the border so it becomes a second line hope you understand
-          wordWrap: { 
-            width: rowW - 220, 
-            useAdvancedWrap: true 
-          }
-        }).setOrigin(0, 0.5)
-      );
-      // checkmark
-      if (ach.done) {
+        if (i > 0) {
+          rowCont.add(
+            this.add.rectangle(containerX, listTop + i * rowH, rowW, 0.5, 0x000000)
+          );
+        }
         rowCont.add(
-          this.add.image(rowLeft + rowW - 60, ry, "GJ_completed_001").setScale(0.6)
+          this.add.image(rowLeft + 70, ry, ach.done ? "GJ_lock_open_001" : "GJ_lock_001")
+            .setScale(0.65)
         );
-      }
-    });
+        rowCont.add(
+          this.add.bitmapText(rowLeft + 128, ry - 45, 'goldFont', ach.title, 22)
+            .setOrigin(0, 0.5).setScale(1.8)
+        );
+        rowCont.add(
+          this.add.text(rowLeft + 130, ry + 13, ach.desc, {
+            fontFamily: 'Arial',
+            fontSize: '27px',
+            color: '#ffffff',
+            wordWrap: { 
+              width: rowW - 220, 
+              useAdvancedWrap: true 
+            }
+          }).setOrigin(0, 0.5)
+        );
+        if (ach.done) {
+          rowCont.add(
+            this.add.image(rowLeft + rowW - 60, ry, "GJ_completed_001").setScale(0.6)
+          );
+        }
+      });
+
+      applyMask();
+      updatePageLbl();
+      rowCont.setVisible(true);
+    };
+
+    renderPage(0);
 
    const onWheel = (e) => {
    if (!this._achieveLayerInternal) return;
    scrollY = Phaser.Math.Clamp(scrollY + e.deltaY * 0.4, 0, maxScroll);
    rowCont.y = -scrollY;
    applyMask();
-   updatePageLbl();
 };
     this.input.on('wheel', onWheel);
     this._achieveWheelCleanup = () => this.input.off('wheel', onWheel);
+
+    const leftArrow = this.add.image(containerX - 480, listTop + 214, "GJ_GameSheet03", "GJ_arrow_01_001.png")
+      .setInteractive();
+    const rightArrow = this.add.image(containerX + 480, listTop + 214, "GJ_GameSheet03", "GJ_arrow_01_001.png")
+      .setFlipX(true).setInteractive();
+    this._achieveLayerInternal.add(leftArrow);
+    this._achieveLayerInternal.add(rightArrow);
+
+    this._makeBouncyButton(leftArrow, 1, () => {
+      if (currentPage > 0) { currentPage--; renderPage(currentPage); }
+    });
+    this._makeBouncyButton(rightArrow, 1, () => {
+      if (currentPage < totalPages - 1) { currentPage++; renderPage(currentPage); }
+    });
 
     const backBtn = this.add.image(containerX - 535, 30, 'GJ_GameSheet03', 'GJ_arrow_03_001.png')
       .setInteractive();
@@ -9046,4 +9069,3 @@ _showAchievementsScreen() {
   }
 
 }
-
