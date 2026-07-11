@@ -142,7 +142,7 @@ class BootScene extends Phaser.Scene {
       "Looking for pixels",
       "Loading awesome soundtracks...",
       "What if the spikes are the good guys?",
-      "Pro tip: Jump",
+      "Dr. Webb will help you with rage problems",
       "Does anyone even read this?",
       "Collecting scrap metal",
       "Waiting for planets to align",
@@ -171,21 +171,21 @@ class BootScene extends Phaser.Scene {
       "Hop the big guy doesn't wakt up...",
       "Shhhh! You're gonna wake the big one!",
       "I have been expecting you.",
-      "A wild WebDasher appeared!",
+      "A wild Web Dasher appeared!",
       "So many secrets...",
       "Hiding rocket launcher",
       "It's Over 9000!",
       "Programming amazing AI",
       "Hiding secret vault",
       "Spooky doesn't get out much",
-      "Rohan was here",
+      "Rohan hates pull requests",
       "Warp Speed",
       "So, what's up?",
       "Hold on, reading the manual",
       "I don't know how this works...",
-      "Why u have to be mad?",
+      "The WBDL ranks the hardest levels in Web Dashers",
       "It is only game...",
-      "Unlock new icons and colors by completing achievements"
+      "Flex off your achievements"
     ];
     const sliderOriginX = cx - 105;
     const sliderOriginY = cy + 110;
@@ -197,6 +197,7 @@ class BootScene extends Phaser.Scene {
     this.load.atlas("GJ_LaunchSheet", "assets/sheets/GJ_LaunchSheet.png", "assets/sheets/GJ_LaunchSheet.json");
     this.load.image("goldFont", "assets/fonts/goldFont.png");
     this.load.text("goldFontFnt", "assets/fonts/goldFont.fnt");
+    this.load.atlas("GJ_ModSheet", "assets/sheets/GJ_ModSheet.png", "assets/sheets/GJ_ModSheet.json");
     
     this.load.once("complete", () => {
       const tex = this.textures.get("game_bg_01");
@@ -213,9 +214,9 @@ class BootScene extends Phaser.Scene {
       const msg = LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
       this.add.bitmapText(cx, cy + 187, "goldFont", msg, 30).setOrigin(0.5);
       const robtopLogo = this.add.image(cx, cy - 120, "GJ_LaunchSheet", "RobTopLogoBig_001.png").setOrigin(0.5).setScale(0.8);
-      const gjLogo = this.add.image(cx, cy, "GJ_LaunchSheet", "GJ_logo_001.png").setOrigin(0.5);
-      const fmodLogo = this.add.image(cx + 560, cy + 240, "GJ_LaunchSheet", "fmodLogo.png").setOrigin(1, 0.1).setScale(0.7).setTint(0x000000);
-      const cocos2dxLogo = this.add.image(cx + 560, cy + 280, "GJ_LaunchSheet", "cocos2DxLogo.png").setOrigin(1, 0).setScale(0.7);
+      const gjLogo = this.add.image(cx, cy, "GJ_ModSheet", "GJ_logo_002.png").setOrigin(0.5).setScale(0.7);
+      const fmodLogo = this.add.image(cx + 555, cy + 235, "GJ_LaunchSheet", "fmodLogo.png").setOrigin(1, 0.1).setScale(0.7).setTint(0x000000);
+      const cocos2dxLogo = this.add.image(cx + 555, cy + 280, "GJ_LaunchSheet", "cocos2DxLogo.png").setOrigin(1, 0).setScale(0.7);
       this.children.bringToTop(robtopLogo);
       this.children.bringToTop(gjLogo);
       if (window.gameCache) {
@@ -248,6 +249,7 @@ class BootScene extends Phaser.Scene {
       this.load.atlas("GJ_LaunchSheet", "assets/sheets/GJ_LaunchSheet.png", "assets/sheets/GJ_LaunchSheet.json");
       this.load.atlas("player_ball_00", "assets/sheets/player_ball_00.png", "assets/sheets/player_ball_00.json");
       this.load.atlas("player_dart_00", "assets/sheets/player_dart_00.png", "assets/sheets/player_dart_00.json");
+      this.load.atlas("GJ_ModSheet", "assets/sheets/GJ_ModSheet.png", "assets/sheets/GJ_ModSheet.json");
       this.load.image("bigFont", "assets/fonts/bigFont.png");
       this.load.text("bigFontFnt", "assets/fonts/bigFont.fnt");
       this.load.image("square04_001", "assets/sprites/square04_001.png");

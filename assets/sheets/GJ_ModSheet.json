@@ -1,0 +1,55 @@
+{
+  "frames": {
+    "GJ_logo_002.png": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 1343,
+        "h": 145
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 25,
+        "y": 22,
+        "w": 1343,
+        "h": 145
+      },
+      "sourceSize": {
+        "w": 1398,
+        "h": 179
+      }
+    },
+    "GJ_WBDL.png": {
+      "frame": {
+        "x": 0,
+        "y": 146,
+        "w": 188,
+        "h": 194
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 9,
+        "y": 16,
+        "w": 188,
+        "h": 194
+      },
+      "sourceSize": {
+        "w": 200,
+        "h": 216
+      }
+    }
+  },
+  "meta": {
+    "app": "https://gdcolon.com/gdsplitter/",
+    "version": "1.0",
+    "image": "GJ_ModSheet.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 1343,
+      "h": 340
+    },
+    "scale": 1
+  }
+}
